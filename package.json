@@ -1,0 +1,9 @@
+{
+  "name": "todo-app",
+  "version": "1.0.0",
+  "scripts": {
+    "install:all": "cd backend && bun install; cd ../frontend && bun install",
+    "dev:backend": "cd backend && bun --watch server.ts",
+    "dev:frontend": "cd frontend && bunx --bun vite"
+  }
+}
