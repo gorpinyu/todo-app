@@ -2,15 +2,18 @@
   "name": "todo-backend",
   "version": "1.0.0",
   "scripts": {
-    "dev": "node --watch --experimental-strip-types server.ts",
-    "dev:bun": "bun --watch server.ts",
+    "dev": "bun --watch server.ts",
     "build": "tsc",
     "start": "node dist/server.js"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "jsonwebtoken": "^9.0.3",
     "pg": "^8.11.0"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20.0.0",
     "@types/pg": "^8.11.0",
     "typescript": "^5.0.0"

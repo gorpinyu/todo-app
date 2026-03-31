@@ -9,6 +9,7 @@ from aws_cdk import (
     aws_s3_deployment as s3deploy,
     aws_cloudfront as cloudfront,
     aws_cloudfront_origins as origins,
+    aws_secretsmanager as secretsmanager,
     Duration,
     RemovalPolicy,
     CfnOutput,
@@ -58,6 +59,11 @@ class TodoStack(cdk.Stack):
         lambda_sg = ec2.SecurityGroup(self, "LambdaSgResource", vpc=vpc, description="Lambda security group")
         db_sg.add_ingress_rule(lambda_sg, ec2.Port.tcp(5432), "Lambda to RDS")
 
+        jwt_secret = secretsmanager.Secret.from_secret_complete_arn(
+            self, "JwtSecretResource",
+            "arn:aws:secretsmanager:us-east-1:296122127181:secret:todo-dev/jwt-secret-wHDHqa"
+        )
+
         # ── Lambda (public subnet, no NAT needed) ─────────────────────────────
         backend_fn = lambda_.Function(
             self, "BackendFnResource",
@@ -74,6 +80,7 @@ class TodoStack(cdk.Stack):
                 "DB_NAME": "todo",
                 "DB_USER": "todo_admin",
                 "DB_PASSWORD": db_secret.secret_value_from_json("password").unsafe_unwrap(),
+                "JWT_SECRET": jwt_secret.secret_value.unsafe_unwrap(),
                 "NODE_ENV": stage,
             },
             timeout=Duration.seconds(30),

@@ -23,6 +23,13 @@ export async function query(text: string, params?: unknown[]) {
 }
 
 export async function initDb(): Promise<void> {
+  await query(`CREATE TABLE IF NOT EXISTS users (
+    id            SERIAL PRIMARY KEY,
+    email         TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at    TIMESTAMPTZ DEFAULT NOW()
+  )`);
+
   await query(`CREATE TABLE IF NOT EXISTS categories (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
@@ -42,9 +49,12 @@ export async function initDb(): Promise<void> {
     status TEXT NOT NULL DEFAULT 'todo',
     priority_id INTEGER REFERENCES priorities(id),
     category_id INTEGER REFERENCES categories(id),
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
     due_date TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`);
+
+  await query(`CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id)`).catch(() => {});
 
   await query(`CREATE TABLE IF NOT EXISTS comments (
     id SERIAL PRIMARY KEY,
@@ -56,7 +66,7 @@ export async function initDb(): Promise<void> {
   const { rows } = await query("SELECT COUNT(*) as c FROM categories");
   if (parseInt(rows[0].c) > 0) return;
 
-  // Seed data
+  // Seed categories and priorities (shared across all users)
   const cats = [["Work","💼"],["Personal","🏠"],["Health","💪"],["Learning","📚"],["Finance","💰"],["Shopping","🛒"]];
   for (const [name, emoji] of cats) {
     await query("INSERT INTO categories (name, emoji) VALUES ($1, $2)", [name, emoji]);
@@ -66,6 +76,11 @@ export async function initDb(): Promise<void> {
   for (const [name, emoji] of prios) {
     await query("INSERT INTO priorities (name, emoji) VALUES ($1, $2)", [name, emoji]);
   }
+}
+
+export async function seedUserTasks(userId: number): Promise<void> {
+  const { rows } = await query("SELECT COUNT(*) as c FROM tasks WHERE user_id = $1", [userId]);
+  if (parseInt(rows[0].c) > 0) return;
 
   const tasks: [string, string, string, number, number, string][] = [
     ["Fix auth token refresh bug", "JWT tokens expire silently — add auto-refresh logic in the API client interceptor.", "todo", 1, 1, "2026-04-02"],
@@ -86,22 +101,28 @@ export async function initDb(): Promise<void> {
   ];
   for (const [title, desc, status, prio, cat, due] of tasks) {
     await query(
-      "INSERT INTO tasks (title, description, status, priority_id, category_id, due_date) VALUES ($1,$2,$3,$4,$5,$6)",
-      [title, desc, status, prio, cat, due],
+      "INSERT INTO tasks (title, description, status, priority_id, category_id, user_id, due_date) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+      [title, desc, status, prio, cat, userId, due],
     );
   }
 
-  const comments: [number, string][] = [
-    [1, "Reproduced — happens after exactly 60 min idle. Axios interceptor looks like the fix point."],
-    [1, "PR drafted. Needs review from the backend team before merge."],
-    [2, "Lint and test steps green. Deploy step blocked on secrets config in repo settings."],
-    [4, "Hit 90kg x3 today. Shoulders held up. On track for 100kg by May."],
-    [7, "Migration ran clean. Zero errors in the first 30 min monitoring window."],
-    [10, "ADR reviewed and approved by the team. Merged into the docs repo."],
-    [13, "OEM parts ordered from the dealer. Arriving Friday. Job booked for Saturday 9am."],
-    [14, "6 of 8 PRs merged. Two need more discussion — flagged in Slack."],
+  const { rows: taskRows } = await query(
+    "SELECT id FROM tasks WHERE user_id = $1 ORDER BY id ASC",
+    [userId],
+  );
+  const ids = taskRows.map((r: any) => r.id);
+
+  const commentSeeds: [number, string][] = [
+    [ids[0], "Reproduced — happens after exactly 60 min idle. Axios interceptor looks like the fix point."],
+    [ids[0], "PR drafted. Needs review from the backend team before merge."],
+    [ids[1], "Lint and test steps green. Deploy step blocked on secrets config in repo settings."],
+    [ids[3], "Hit 90kg x3 today. Shoulders held up. On track for 100kg by May."],
+    [ids[6], "Migration ran clean. Zero errors in the first 30 min monitoring window."],
+    [ids[9], "ADR reviewed and approved by the team. Merged into the docs repo."],
+    [ids[12], "OEM parts ordered from the dealer. Arriving Friday. Job booked for Saturday 9am."],
+    [ids[13], "6 of 8 PRs merged. Two need more discussion — flagged in Slack."],
   ];
-  for (const [taskId, content] of comments) {
-    await query("INSERT INTO comments (task_id, content) VALUES ($1, $2)", [taskId, content]);
+  for (const [taskId, content] of commentSeeds) {
+    if (taskId) await query("INSERT INTO comments (task_id, content) VALUES ($1, $2)", [taskId, content]);
   }
 }
