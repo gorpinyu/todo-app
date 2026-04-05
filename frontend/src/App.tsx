@@ -5,13 +5,20 @@ import Board from "./components/Board";
 import TaskModal from "./components/TaskModal";
 import TaskDetailModal from "./components/TaskDetailModal";
 import ConfirmDialog from "./components/ConfirmDialog";
+import ArchiveView from "./components/ArchiveView";
+import CalendarView from "./components/CalendarView";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
+
+type View = "all" | "todo" | "inprogress" | "completed" | "overdue" | "archive" | "calendar";
+type AuthView = "login" | "register" | "forgot";
 
 function AppShell() {
   const { user, token, logout } = useAuth();
-  const [authView, setAuthView] = useState<"login" | "register">("login");
+  const [authView, setAuthView] = useState<AuthView>("login");
   const [tasks, setTasks] = useState<Task[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [priorities, setPriorities] = useState<Priority[]>([]);
@@ -21,7 +28,7 @@ function AppShell() {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [detailTask, setDetailTask] = useState<Task | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
-  const [activeFilter, setActiveFilter] = useState<string>("all");
+  const [activeView, setActiveView] = useState<View>("all");
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -37,8 +44,11 @@ function AppShell() {
   useEffect(() => { if (token) load(); else setLoading(false); }, [token, load]);
 
   if (!user || !token) {
+    const resetToken = new URLSearchParams(window.location.search).get("reset_token");
+    if (resetToken) return <ResetPasswordPage token={resetToken} onDone={() => setAuthView("login")} />;
+    if (authView === "forgot") return <ForgotPasswordPage onBack={() => setAuthView("login")} />;
     return authView === "login"
-      ? <LoginPage onSwitch={() => setAuthView("register")} />
+      ? <LoginPage onSwitch={() => setAuthView("register")} onForgotPassword={() => setAuthView("forgot")} />
       : <RegisterPage onSwitch={() => setAuthView("login")} />;
   }
 
@@ -85,17 +95,24 @@ function AppShell() {
   const overdue = tasks.filter(t => t.due_date && new Date(t.due_date) < new Date() && t.status !== "completed").length;
   const pct = tasks.length ? Math.round((completed / tasks.length) * 100) : 0;
 
-  const navItems = [
-    { key: "all", icon: "◈", label: "All Tasks", count: tasks.length },
-    { key: "todo", icon: "○", label: "To Do", count: todo },
-    { key: "inprogress", icon: "◑", label: "In Progress", count: inprog },
-    { key: "completed", icon: "●", label: "Completed", count: completed },
-    { key: "overdue", icon: "⚠", label: "Overdue", count: overdue },
+  const boardNavItems = [
+    { key: "all" as View,        icon: "◈", label: "All Tasks",  count: tasks.length },
+    { key: "todo" as View,       icon: "○", label: "To Do",       count: todo },
+    { key: "inprogress" as View, icon: "◑", label: "In Progress", count: inprog },
+    { key: "completed" as View,  icon: "●", label: "Completed",   count: completed },
+    { key: "overdue" as View,    icon: "⚠", label: "Overdue",     count: overdue },
   ];
 
-  const filteredTasks = activeFilter === "all" ? tasks
-    : activeFilter === "overdue" ? tasks.filter(t => t.due_date && new Date(t.due_date) < new Date() && t.status !== "completed")
-    : tasks.filter(t => t.status === activeFilter);
+  const filteredTasks = activeView === "all" ? tasks
+    : activeView === "overdue" ? tasks.filter(t => t.due_date && new Date(t.due_date) < new Date() && t.status !== "completed")
+    : tasks.filter(t => t.status === activeView);
+
+  const viewTitle: Record<View, string> = {
+    all: "All Tasks", todo: "To Do", inprogress: "In Progress",
+    completed: "Completed", overdue: "Overdue", archive: "Archive", calendar: "Calendar",
+  };
+
+  const isBoardView = !["archive", "calendar"].includes(activeView);
 
   return (
     <div className="app">
@@ -115,41 +132,59 @@ function AppShell() {
         </div>
         <nav className="sidebar-nav">
           <span className="sidebar-label">Views</span>
-          {navItems.map(item => (
-            <button key={item.key} className={`sidebar-item${activeFilter === item.key ? " active" : ""}`} onClick={() => setActiveFilter(item.key)}>
+          {boardNavItems.map(item => (
+            <button key={item.key} className={`sidebar-item${activeView === item.key ? " active" : ""}`} onClick={() => setActiveView(item.key)}>
               <span className="sidebar-item-icon">{item.icon}</span>
               {item.label}
               {item.count > 0 && <span className="sidebar-item-count">{item.count}</span>}
             </button>
           ))}
+          <span className="sidebar-label" style={{ marginTop: "0.75rem" }}>Tools</span>
+          <button className={`sidebar-item${activeView === "calendar" ? " active" : ""}`} onClick={() => setActiveView("calendar")}>
+            <span className="sidebar-item-icon">📅</span>Calendar
+          </button>
+          <button className={`sidebar-item${activeView === "archive" ? " active" : ""}`} onClick={() => setActiveView("archive")}>
+            <span className="sidebar-item-icon">🗄</span>Archive
+          </button>
         </nav>
         <div className="sidebar-footer">
           <div className="sidebar-user">
             <span className="sidebar-user-avatar">{user.email[0].toUpperCase()}</span>
             <span className="sidebar-user-email">{user.email}</span>
           </div>
-          <button className="sidebar-new-btn" onClick={() => { setEditingTask(null); setShowTaskModal(true); }}>+ New Task</button>
+          {isBoardView && (
+            <button className="sidebar-new-btn" onClick={() => { setEditingTask(null); setShowTaskModal(true); }}>+ New Task</button>
+          )}
           <button className="sidebar-logout-btn" onClick={logout}>Sign out</button>
         </div>
       </aside>
 
       <div className="main">
         <header className="topbar">
-          <h1 className="topbar-title">{navItems.find(n => n.key === activeFilter)?.label ?? "All Tasks"}</h1>
-          <div className="topbar-right">
-            <span className="stat-chip">Total <strong>{tasks.length}</strong></span>
-            <span className="stat-chip progress-chip">
-              <div className="progress-track"><div className="progress-fill" style={{ width: `${pct}%` }} /></div>
-              <strong>{pct}%</strong>
-            </span>
-          </div>
+          <h1 className="topbar-title">{viewTitle[activeView]}</h1>
+          {isBoardView && (
+            <div className="topbar-right">
+              <span className="stat-chip">Total <strong>{tasks.length}</strong></span>
+              <span className="stat-chip progress-chip">
+                <div className="progress-track"><div className="progress-fill" style={{ width: `${pct}%` }} /></div>
+                <strong>{pct}%</strong>
+              </span>
+            </div>
+          )}
         </header>
-        <Board tasks={filteredTasks} onCardClick={setDetailTask} onEdit={t => { setEditingTask(t); setShowTaskModal(true); }} onDelete={id => setConfirmDeleteId(id)} onStatusChange={handleStatusChange} />
+        {activeView === "archive" && <ArchiveView />}
+        {activeView === "calendar" && <CalendarView tasks={tasks} />}
+        {isBoardView && (
+          <Board tasks={filteredTasks} onCardClick={setDetailTask}
+            onEdit={t => { setEditingTask(t); setShowTaskModal(true); }}
+            onDelete={id => setConfirmDeleteId(id)}
+            onStatusChange={handleStatusChange} />
+        )}
       </div>
 
       {showTaskModal && <TaskModal task={editingTask} categories={categories} priorities={priorities} onSave={handleSave} onClose={() => { setShowTaskModal(false); setEditingTask(null); }} />}
       {detailTask && <TaskDetailModal task={detailTask} onClose={() => setDetailTask(null)} onDelete={id => { setDetailTask(null); setConfirmDeleteId(id); }} onMarkComplete={id => handleStatusChange(id, "completed")} onEdit={task => { setDetailTask(null); setEditingTask(task); setShowTaskModal(true); }} />}
-      {confirmDeleteId !== null && <ConfirmDialog message="Are you sure you want to delete this task? This action cannot be undone." onConfirm={() => handleDelete(confirmDeleteId)} onCancel={() => setConfirmDeleteId(null)} />}
+      {confirmDeleteId !== null && <ConfirmDialog message="Move this task to archive?" onConfirm={() => handleDelete(confirmDeleteId)} onCancel={() => setConfirmDeleteId(null)} />}
     </div>
   );
 }

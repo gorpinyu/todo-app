@@ -11,9 +11,12 @@ async function getPool(): Promise<Pool> {
     user: process.env.DB_USER ?? "todo_admin",
     password: process.env.DB_PASSWORD ?? "postgres",
     database: process.env.DB_NAME ?? "todo",
-    max: 5,
+    max: 1,
+    idleTimeoutMillis: 10000,
+    connectionTimeoutMillis: 5000,
     ssl: process.env.DB_HOST?.includes("rds.amazonaws.com") ? { rejectUnauthorized: false } : false,
   });
+  pool.on("error", () => { pool = null; });
   return pool;
 }
 
@@ -50,6 +53,7 @@ export async function initDb(): Promise<void> {
     priority_id INTEGER REFERENCES priorities(id),
     category_id INTEGER REFERENCES categories(id),
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    archived BOOLEAN NOT NULL DEFAULT FALSE,
     due_date TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`);
@@ -60,6 +64,15 @@ export async function initDb(): Promise<void> {
     id SERIAL PRIMARY KEY,
     task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`);
+
+  await query(`CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token TEXT NOT NULL UNIQUE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    used BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`);
 

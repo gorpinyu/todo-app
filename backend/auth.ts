@@ -1,5 +1,7 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
+import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 import { query, seedUserTasks } from "./db.js";
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "dev-secret-change-in-prod";
@@ -62,6 +64,71 @@ export async function handleAuth(req: Request): Promise<Response | null> {
   }
 
   return null; // not an auth route
+}
+
+const lambdaClient = new LambdaClient({ region: "us-east-1" });
+const FROM_EMAIL = process.env.SES_FROM_EMAIL ?? "kiroandrii@gmail.com";
+const APP_URL = process.env.APP_URL ?? "https://d1tvflu4vk8bmb.cloudfront.net";
+const EMAIL_FUNCTION_NAME = process.env.EMAIL_FUNCTION_NAME ?? "";
+
+async function sendEmailAsync(to: string, subject: string, html: string, text: string) {
+  if (!EMAIL_FUNCTION_NAME) return;
+  await lambdaClient.send(new InvokeCommand({
+    FunctionName: EMAIL_FUNCTION_NAME,
+    InvocationType: "Event",
+    Payload: Buffer.from(JSON.stringify({ from: FROM_EMAIL, to, subject, html, text })),
+  }));
+}
+
+export async function handlePasswordReset(req: Request): Promise<Response | null> {
+  const url = new URL(req.url);
+  const path = url.pathname;
+  const method = req.method;
+
+  if (path === "/api/auth/forgot-password" && method === "POST") {
+    const { email } = await req.json();
+    if (!email) return json({ error: "Email required" }, 400);
+
+    const { rows } = await query("SELECT id FROM users WHERE email = $1", [email]);
+    if (rows.length === 0) return json({ message: "If that email exists, a reset link has been sent." });
+
+    const token = crypto.randomBytes(32).toString("hex");
+    const expires = new Date(Date.now() + 60 * 60 * 1000);
+    await query(
+      "INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)",
+      [rows[0].id, token, expires.toISOString()],
+    );
+
+    const resetUrl = `${APP_URL}?reset_token=${token}`;
+    await sendEmailAsync(
+      email,
+      "Reset your TaskBoard password",
+      `<p>Click the link below to reset your password. It expires in 1 hour.</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>If you didn't request this, ignore this email.</p>`,
+      `Reset your password: ${resetUrl}\n\nExpires in 1 hour. If you didn't request this, ignore this email.`,
+    );
+
+    return json({ message: "If that email exists, a reset link has been sent." });
+  }
+
+  if (path === "/api/auth/reset-password" && method === "POST") {
+    const { token, password } = await req.json();
+    if (!token || !password) return json({ error: "Token and password required" }, 400);
+    if (password.length < 8) return json({ error: "Password must be at least 8 characters" }, 400);
+
+    const { rows } = await query(
+      "SELECT id, user_id FROM password_reset_tokens WHERE token = $1 AND used = FALSE AND expires_at > NOW()",
+      [token],
+    );
+    if (rows.length === 0) return json({ error: "Invalid or expired reset token" }, 400);
+
+    const password_hash = await bcrypt.hash(password, 12);
+    await query("UPDATE users SET password_hash = $1 WHERE id = $2", [password_hash, rows[0].user_id]);
+    await query("UPDATE password_reset_tokens SET used = TRUE WHERE id = $1", [rows[0].id]);
+
+    return json({ message: "Password updated successfully" });
+  }
+
+  return null;
 }
 
 export function verifyToken(authHeader: string | undefined): { user_id: number; email: string } | null {

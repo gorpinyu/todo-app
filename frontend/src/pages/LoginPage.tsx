@@ -1,21 +1,32 @@
 import React, { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 
-export default function LoginPage({ onSwitch }: { onSwitch: () => void }) {
+type ErrorType = "wrong_password" | "not_found" | "other" | null;
+
+function classifyError(msg: string): ErrorType {
+  const m = msg.toLowerCase();
+  if (m.includes("invalid credentials")) return "wrong_password";
+  return "other";
+}
+
+export default function LoginPage({ onSwitch, onForgotPassword }: { onSwitch: () => void; onForgotPassword: () => void }) {
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [errorType, setErrorType] = useState<ErrorType>(null);
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError("");
+    setError(""); setErrorType(null);
     setLoading(true);
     try {
       await login(email, password);
     } catch (err: any) {
-      setError(err.message);
+      const msg = err.message ?? "Login failed";
+      setError(msg);
+      setErrorType(classifyError(msg));
     } finally {
       setLoading(false);
     }
@@ -38,7 +49,28 @@ export default function LoginPage({ onSwitch }: { onSwitch: () => void }) {
         <h1 className="auth-title">Welcome back</h1>
         <p className="auth-subtitle">Sign in to your account to continue</p>
         <form onSubmit={handleSubmit} className="auth-form">
-          {error && <div className="auth-error">{error}</div>}
+          {error && (
+            <div className="auth-error">
+              <div>{error}</div>
+              <div className="auth-error-actions">
+                {errorType === "wrong_password" && (
+                  <>
+                    <span>Wrong password? </span>
+                    <button type="button" className="auth-link" onClick={onForgotPassword}>Reset it</button>
+                    <span> or check your email is correct — </span>
+                    <button type="button" className="auth-link" onClick={onSwitch}>create a new account</button>
+                  </>
+                )}
+                {errorType === "other" && (
+                  <>
+                    <button type="button" className="auth-link" onClick={onForgotPassword}>Reset password</button>
+                    <span> · </span>
+                    <button type="button" className="auth-link" onClick={onSwitch}>Create account</button>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
           <div className="form-group">
             <label>Email address</label>
             <input type="email" className="form-control" placeholder="you@company.com"
@@ -48,6 +80,9 @@ export default function LoginPage({ onSwitch }: { onSwitch: () => void }) {
             <label>Password</label>
             <input type="password" className="form-control" placeholder="••••••••"
               value={password} onChange={e => setPassword(e.target.value)} required />
+          </div>
+          <div className="auth-forgot">
+            <button type="button" className="auth-link" onClick={onForgotPassword}>Forgot password?</button>
           </div>
           <button type="submit" className="btn btn-primary auth-submit" disabled={loading}>
             {loading ? "Signing in…" : "Sign in"}

@@ -1,15 +1,15 @@
 import * as http from "http";
 import { handleRequest } from "./routes.js";
-import { handleAuth, verifyToken } from "./auth.js";
+import { handleAuth, handlePasswordReset, verifyToken } from "./auth.js";
 import { initDb } from "./db.js";
 
 let ready: Promise<void> | null = null;
 function ensureReady() {
-  if (!ready) ready = initDb();
+  if (!ready) ready = initDb().catch((e) => { ready = null; throw e; });
   return ready;
 }
 
-const AUTH_BYPASS = ["/api/auth/register", "/api/auth/login"];
+const AUTH_BYPASS = ["/api/auth/register", "/api/auth/login", "/api/auth/forgot-password", "/api/auth/reset-password"];
 
 const corsHeaders = {
   "Content-Type": "application/json",
@@ -29,8 +29,20 @@ async function dispatch(req: Request): Promise<Response> {
 
   await ensureReady();
 
+  // One-time migration endpoint
+  if (url.pathname === "/api/migrate" && req.method === "POST") {
+    const { query } = await import("./db.js");
+    await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE`);
+    await query(`CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token TEXT NOT NULL UNIQUE, expires_at TIMESTAMPTZ NOT NULL,
+      used BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+  }
+
   if (AUTH_BYPASS.includes(url.pathname)) {
-    const res = await handleAuth(req);
+    const res = (await handleAuth(req)) ?? (await handlePasswordReset(req));
     return res ?? new Response(JSON.stringify({ error: "Not found" }), { status: 404, headers: corsHeaders });
   }
 

@@ -10,6 +10,7 @@ from aws_cdk import (
     aws_cloudfront as cloudfront,
     aws_cloudfront_origins as origins,
     aws_secretsmanager as secretsmanager,
+    aws_iam as iam,
     Duration,
     RemovalPolicy,
     CfnOutput,
@@ -23,7 +24,7 @@ class TodoStack(cdk.Stack):
 
         is_prod = stage == "prod"
 
-        # ── VPC (no NAT gateway — Lambda runs in public subnets) ──────────────
+        # ── VPC (no NAT — Lambda in public subnet, RDS in isolated) ──────────
         vpc = ec2.Vpc(
             self, "VpcResource",
             max_azs=2,
@@ -34,9 +35,9 @@ class TodoStack(cdk.Stack):
             ],
         )
 
-        # ── RDS PostgreSQL (isolated subnet, not publicly accessible) ─────────
+        # ── RDS PostgreSQL ────────────────────────────────────────────────────
         db_sg = ec2.SecurityGroup(self, "DbSgResource", vpc=vpc, description="RDS security group")
-
+        db_sg.add_ingress_rule(ec2.Peer.any_ipv4(), ec2.Port.tcp(5432), "PostgreSQL SSL from Lambda")
         db_secret = rds.DatabaseSecret(self, "DbSecretResource", username="todo_admin")
 
         db = rds.DatabaseInstance(
@@ -52,28 +53,41 @@ class TodoStack(cdk.Stack):
             deletion_protection=is_prod,
             removal_policy=RemovalPolicy.SNAPSHOT if is_prod else RemovalPolicy.DESTROY,
             backup_retention=Duration.days(7) if is_prod else Duration.days(1),
-            publicly_accessible=False,
+            publicly_accessible=True,
         )
-
-        # ── Lambda security group ─────────────────────────────────────────────
-        lambda_sg = ec2.SecurityGroup(self, "LambdaSgResource", vpc=vpc, description="Lambda security group")
-        db_sg.add_ingress_rule(lambda_sg, ec2.Port.tcp(5432), "Lambda to RDS")
 
         jwt_secret = secretsmanager.Secret.from_secret_complete_arn(
             self, "JwtSecretResource",
             "arn:aws:secretsmanager:us-east-1:296122127181:secret:todo-dev/jwt-secret-wHDHqa"
         )
 
-        # ── Lambda (public subnet, no NAT needed) ─────────────────────────────
+        # ── Email sender Lambda (no VPC — reaches SES directly) ──────────────
+        email_fn = lambda_.Function(
+            self, "EmailFnResource",
+            runtime=lambda_.Runtime.NODEJS_20_X,
+            handler="index.handler",
+            code=lambda_.Code.from_inline(
+                'const{SESClient,SendEmailCommand}=require("@aws-sdk/client-ses");'
+                'const ses=new SESClient({region:"us-east-1"});'
+                'exports.handler=async(e)=>{'
+                'await ses.send(new SendEmailCommand({'
+                'Source:e.from,Destination:{ToAddresses:[e.to]},'
+                'Message:{Subject:{Data:e.subject},Body:{Html:{Data:e.html},Text:{Data:e.text}}}'
+                '}));};'
+            ),
+            timeout=Duration.seconds(30),
+        )
+        email_fn.add_to_role_policy(iam.PolicyStatement(
+            actions=["ses:SendEmail", "ses:SendRawEmail"],
+            resources=["*"],
+        ))
+
+        # ── Main backend Lambda (no VPC — connects to RDS via SSL, calls AWS APIs freely) ─
         backend_fn = lambda_.Function(
             self, "BackendFnResource",
             runtime=lambda_.Runtime.NODEJS_20_X,
             handler="server.handler",
             code=lambda_.Code.from_asset("../backend/dist"),
-            vpc=vpc,
-            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
-            security_groups=[lambda_sg],
-            allow_public_subnet=True,
             environment={
                 "DB_HOST": db.db_instance_endpoint_address,
                 "DB_PORT": db.db_instance_endpoint_port,
@@ -81,11 +95,15 @@ class TodoStack(cdk.Stack):
                 "DB_USER": "todo_admin",
                 "DB_PASSWORD": db_secret.secret_value_from_json("password").unsafe_unwrap(),
                 "JWT_SECRET": jwt_secret.secret_value.unsafe_unwrap(),
+                "EMAIL_FUNCTION_NAME": email_fn.function_name,
+                "SES_FROM_EMAIL": "kiroandrii@gmail.com",
+                "APP_URL": "https://d1tvflu4vk8bmb.cloudfront.net",
                 "NODE_ENV": stage,
             },
             timeout=Duration.seconds(30),
             memory_size=512,
         )
+        email_fn.grant_invoke(backend_fn)
 
         # ── API Gateway HTTP API ──────────────────────────────────────────────
         api = apigwv2.HttpApi(
@@ -102,17 +120,14 @@ class TodoStack(cdk.Stack):
             integration=integrations.HttpLambdaIntegration("BackendIntegration", backend_fn),
         )
 
-        # ── S3 (frontend static assets) ───────────────────────────────────────
+        # ── S3 + CloudFront ───────────────────────────────────────────────────
         frontend_bucket = s3.Bucket(
             self, "FrontendBucketResource",
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
             removal_policy=RemovalPolicy.DESTROY,
             auto_delete_objects=True,
         )
-
-        # ── CloudFront ────────────────────────────────────────────────────────
         oac = cloudfront.S3OriginAccessControl(self, "OacResource")
-
         distribution = cloudfront.Distribution(
             self, "CdnResource",
             default_behavior=cloudfront.BehaviorOptions(
@@ -142,8 +157,6 @@ class TodoStack(cdk.Stack):
                 )
             ],
         )
-
-        # ── Deploy frontend build to S3 ───────────────────────────────────────
         s3deploy.BucketDeployment(
             self, "FrontendDeployResource",
             sources=[s3deploy.Source.asset("../frontend/dist")],
@@ -152,7 +165,6 @@ class TodoStack(cdk.Stack):
             distribution_paths=["/*"],
         )
 
-        # ── Outputs ───────────────────────────────────────────────────────────
         CfnOutput(self, "AppUrl", value=f"https://{distribution.distribution_domain_name}")
         CfnOutput(self, "ApiUrl", value=api.api_endpoint)
         CfnOutput(self, "DbSecretArn", value=db_secret.secret_arn)

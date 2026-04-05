@@ -19,6 +19,7 @@ export interface Task {
   category: Category | null;
   due_date: string | null;
   created_at: string;
+  archived: boolean;
 }
 
 export interface Comment {
