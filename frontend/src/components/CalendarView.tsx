@@ -1,7 +1,13 @@
 import React, { useState } from "react";
 import type { Task } from "../types";
 
-interface Props { tasks: Task[]; }
+interface Props {
+  tasks: Task[];
+  onTaskClick: (task: Task) => void;
+  onTaskDateChange: (taskId: number, newDate: string) => void;
+}
+
+type ViewMode = "month" | "week";
 
 const STATUS_COLORS: Record<string, string> = {
   todo:        "#e2e8f0",
@@ -14,11 +20,18 @@ const STATUS_TEXT: Record<string, string> = {
   completed:   "#065f46",
 };
 
-export default function CalendarView({ tasks }: Props) {
+export default function CalendarView({ tasks, onTaskClick, onTaskDateChange }: Props) {
   const todayDate = new Date();
   todayDate.setHours(0, 0, 0, 0);
   const [year, setYear] = useState(todayDate.getFullYear());
   const [month, setMonth] = useState(todayDate.getMonth());
+  const [viewMode, setViewMode] = useState<ViewMode>("month");
+  const [weekStart, setWeekStart] = useState(() => {
+    const d = new Date(todayDate);
+    d.setDate(d.getDate() - d.getDay());
+    return d;
+  });
+  const [draggedTask, setDraggedTask] = useState<Task | null>(null);
 
   function isOverdue(task: Task) {
     if (!task.due_date || task.status === "completed") return false;
@@ -27,65 +40,211 @@ export default function CalendarView({ tasks }: Props) {
 
   const activeTasks = tasks.filter(t => !t.archived && t.due_date);
 
-  function prevMonth() {
-    if (month === 0) { setMonth(11); setYear(y => y - 1); }
-    else setMonth(m => m - 1);
-  }
-  function nextMonth() {
-    if (month === 11) { setMonth(0); setYear(y => y + 1); }
-    else setMonth(m => m + 1);
-  }
-
-  const firstDay = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const monthLabel = new Date(year, month).toLocaleString("default", { month: "long", year: "numeric" });
-
-  const byDay: Record<number, Task[]> = {};
-  for (const task of activeTasks) {
-    const d = new Date(task.due_date!);
-    if (d.getFullYear() === year && d.getMonth() === month) {
-      const day = d.getDate();
-      if (!byDay[day]) byDay[day] = [];
-      byDay[day].push(task);
+  function prevPeriod() {
+    if (viewMode === "month") {
+      if (month === 0) { setMonth(11); setYear(y => y - 1); }
+      else setMonth(m => m - 1);
+    } else {
+      const newStart = new Date(weekStart);
+      newStart.setDate(newStart.getDate() - 7);
+      setWeekStart(newStart);
     }
   }
 
-  const cells: (number | null)[] = [
-    ...Array(firstDay).fill(null),
-    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
-  ];
-  while (cells.length % 7 !== 0) cells.push(null);
+  function nextPeriod() {
+    if (viewMode === "month") {
+      if (month === 11) { setMonth(0); setYear(y => y + 1); }
+      else setMonth(m => m + 1);
+    } else {
+      const newStart = new Date(weekStart);
+      newStart.setDate(newStart.getDate() + 7);
+      setWeekStart(newStart);
+    }
+  }
 
-  const isToday = (day: number) =>
-    day === todayDate.getDate() && month === todayDate.getMonth() && year === todayDate.getFullYear();
+  function handleDragStart(e: React.DragEvent, task: Task) {
+    setDraggedTask(task);
+    e.dataTransfer.effectAllowed = "move";
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  }
+
+  function handleDrop(e: React.DragEvent, targetDate: Date) {
+    e.preventDefault();
+    if (!draggedTask) return;
+    
+    const newDueDate = targetDate.toISOString().split('T')[0];
+    onTaskDateChange(draggedTask.id, newDueDate);
+    setDraggedTask(null);
+  }
+
+  if (viewMode === "month") {
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const monthLabel = new Date(year, month).toLocaleString("default", { month: "long", year: "numeric" });
+
+    const byDay: Record<number, Task[]> = {};
+    for (const task of activeTasks) {
+      const d = new Date(task.due_date!);
+      if (d.getFullYear() === year && d.getMonth() === month) {
+        const day = d.getDate();
+        if (!byDay[day]) byDay[day] = [];
+        byDay[day].push(task);
+      }
+    }
+
+    const cells: (number | null)[] = [
+      ...Array(firstDay).fill(null),
+      ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+    ];
+    while (cells.length % 7 !== 0) cells.push(null);
+
+    const isToday = (day: number) =>
+      day === todayDate.getDate() && month === todayDate.getMonth() && year === todayDate.getFullYear();
+
+    return (
+      <div className="calendar-wrap">
+        <div className="calendar-header">
+          <button className="cal-nav-btn" onClick={prevPeriod}>‹</button>
+          <span className="cal-month-label">{monthLabel}</span>
+          <button className="cal-nav-btn" onClick={nextPeriod}>›</button>
+          <div style={{ marginLeft: "auto", display: "flex", gap: "0.5rem" }}>
+            <button 
+              className={`btn btn-sm ${viewMode === "month" ? "btn-primary" : "btn-secondary"}`}
+              onClick={() => setViewMode("month")}>
+              Month
+            </button>
+            <button 
+              className={`btn btn-sm ${viewMode === "week" ? "btn-primary" : "btn-secondary"}`}
+              onClick={() => setViewMode("week")}>
+              Week
+            </button>
+          </div>
+        </div>
+        <div className="calendar-grid">
+          {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d => (
+            <div key={d} className="cal-day-name">{d}</div>
+          ))}
+          {cells.map((day, i) => {
+            const cellDate = day ? new Date(year, month, day) : null;
+            return (
+              <div 
+                key={i} 
+                className={`cal-cell${day && isToday(day) ? " cal-today" : ""}${!day ? " cal-empty" : ""}`}
+                onDragOver={cellDate ? handleDragOver : undefined}
+                onDrop={cellDate ? (e) => handleDrop(e, cellDate) : undefined}>
+                {day && <span className="cal-day-num">{day}</span>}
+                {day && byDay[day]?.map(task => (
+                  <div 
+                    key={task.id} 
+                    className="cal-task-chip"
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, task)}
+                    onDoubleClick={() => onTaskClick(task)}
+                    style={{
+                      background: STATUS_COLORS[task.status],
+                      color: isOverdue(task) ? "#dc2626" : STATUS_TEXT[task.status],
+                      fontWeight: isOverdue(task) ? 700 : 500,
+                      cursor: "pointer",
+                    }}
+                    title={task.title}>
+                    {task.title}
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+        <div className="cal-legend">
+          <span className="cal-legend-item" style={{ background: STATUS_COLORS.todo, color: STATUS_TEXT.todo }}>To Do</span>
+          <span className="cal-legend-item" style={{ background: STATUS_COLORS.inprogress, color: STATUS_TEXT.inprogress }}>In Progress</span>
+          <span className="cal-legend-item" style={{ background: STATUS_COLORS.completed, color: STATUS_TEXT.completed }}>Completed</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Week view
+  const weekDays: Date[] = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(weekStart);
+    d.setDate(d.getDate() + i);
+    weekDays.push(d);
+  }
+
+  const weekLabel = `${weekDays[0].toLocaleDateString("default", { month: "short", day: "numeric" })} - ${weekDays[6].toLocaleDateString("default", { month: "short", day: "numeric", year: "numeric" })}`;
+
+  const byWeekDay: Record<string, Task[]> = {};
+  for (const task of activeTasks) {
+    const taskDate = new Date(task.due_date!);
+    taskDate.setHours(0, 0, 0, 0);
+    const dateKey = taskDate.toISOString().split('T')[0];
+    if (!byWeekDay[dateKey]) byWeekDay[dateKey] = [];
+    byWeekDay[dateKey].push(task);
+  }
 
   return (
     <div className="calendar-wrap">
       <div className="calendar-header">
-        <button className="cal-nav-btn" onClick={prevMonth}>‹</button>
-        <span className="cal-month-label">{monthLabel}</span>
-        <button className="cal-nav-btn" onClick={nextMonth}>›</button>
+        <button className="cal-nav-btn" onClick={prevPeriod}>‹</button>
+        <span className="cal-month-label">{weekLabel}</span>
+        <button className="cal-nav-btn" onClick={nextPeriod}>›</button>
+        <div style={{ marginLeft: "auto", display: "flex", gap: "0.5rem" }}>
+          <button 
+            className={`btn btn-sm ${viewMode === "month" ? "btn-primary" : "btn-secondary"}`}
+            onClick={() => setViewMode("month")}>
+            Month
+          </button>
+          <button 
+            className={`btn btn-sm ${viewMode === "week" ? "btn-primary" : "btn-secondary"}`}
+            onClick={() => setViewMode("week")}>
+            Week
+          </button>
+        </div>
       </div>
-      <div className="calendar-grid">
-        {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d => (
-          <div key={d} className="cal-day-name">{d}</div>
-        ))}
-        {cells.map((day, i) => (
-          <div key={i} className={`cal-cell${day && isToday(day) ? " cal-today" : ""}${!day ? " cal-empty" : ""}`}>
-            {day && <span className="cal-day-num">{day}</span>}
-            {day && byDay[day]?.map(task => (
-              <div key={task.id} className="cal-task-chip"
-                style={{
-                  background: STATUS_COLORS[task.status],
-                  color: isOverdue(task) ? "#dc2626" : STATUS_TEXT[task.status],
-                  fontWeight: isOverdue(task) ? 700 : 500,
-                }}
-                title={task.title}>
-                {task.title}
+      <div className="week-grid">
+        {weekDays.map((date, idx) => {
+          const dateKey = date.toISOString().split('T')[0];
+          const dayTasks = byWeekDay[dateKey] || [];
+          const isToday = date.toDateString() === todayDate.toDateString();
+          
+          return (
+            <div 
+              key={idx} 
+              className={`week-day${isToday ? " week-today" : ""}`}
+              onDragOver={handleDragOver}
+              onDrop={(e) => handleDrop(e, date)}>
+              <div className="week-day-header">
+                <div className="week-day-name">{date.toLocaleDateString("default", { weekday: "short" })}</div>
+                <div className={`week-day-num${isToday ? " today" : ""}`}>{date.getDate()}</div>
               </div>
-            ))}
-          </div>
-        ))}
+              <div className="week-day-tasks">
+                {dayTasks.map(task => (
+                  <div 
+                    key={task.id}
+                    className="week-task-card"
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, task)}
+                    onDoubleClick={() => onTaskClick(task)}
+                    style={{
+                      borderLeft: `3px solid ${isOverdue(task) ? "#dc2626" : STATUS_COLORS[task.status]}`,
+                      cursor: "pointer",
+                    }}>
+                    <div className="week-task-title">{task.title}</div>
+                    {task.category && (
+                      <div className="week-task-meta">
+                        {task.category.emoji} {task.category.name}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </div>
       <div className="cal-legend">
         <span className="cal-legend-item" style={{ background: STATUS_COLORS.todo, color: STATUS_TEXT.todo }}>To Do</span>

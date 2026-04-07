@@ -19,7 +19,19 @@ export interface Task {
   category: Category | null;
   due_date: string | null;
   created_at: string;
+  completed_at: string | null;
   archived: boolean;
+}
+
+export interface Project {
+  id: number;
+  name: string;
+  description: string | null;
+  color: string | null;
+  emoji: string | null;
+  is_default: boolean;
+  archived: boolean;
+  created_at: string;
 }
 
 export interface Comment {
@@ -36,4 +48,5 @@ export type TaskFormData = {
   priority_id: number | "";
   category_id: number | "";
   due_date: string;
+  completed_at?: string | null;
 };

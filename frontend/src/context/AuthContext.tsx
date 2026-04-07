@@ -57,10 +57,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   function logout() {
-    localStorage.removeItem("auth_token");
-    localStorage.removeItem("auth_user");
+    localStorage.clear(); // Clear ALL localStorage including active_project_id
     setToken(null);
     setUser(null);
+    window.location.reload(); // Force full page reload to clear all state
   }
 
   return (

@@ -33,6 +33,19 @@ export async function initDb(): Promise<void> {
     created_at    TIMESTAMPTZ DEFAULT NOW()
   )`);
 
+  await query(`CREATE TABLE IF NOT EXISTS projects (
+    id          SERIAL PRIMARY KEY,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 100),
+    description TEXT,
+    color       TEXT,
+    emoji       TEXT,
+    is_default  BOOLEAN NOT NULL DEFAULT FALSE,
+    archived    BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+  )`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id)`).catch(() => {});
+
   await query(`CREATE TABLE IF NOT EXISTS categories (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
@@ -53,10 +66,15 @@ export async function initDb(): Promise<void> {
     priority_id INTEGER REFERENCES priorities(id),
     category_id INTEGER REFERENCES categories(id),
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
     archived BOOLEAN NOT NULL DEFAULT FALSE,
     due_date TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    completed_at TIMESTAMPTZ
   )`);
+
+  // Migration: Add completed_at column if it doesn't exist
+  await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ`).catch(() => {});
 
   await query(`CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id)`).catch(() => {});
 
@@ -91,9 +109,24 @@ export async function initDb(): Promise<void> {
   }
 }
 
+export async function ensureDefaultProject(userId: number): Promise<number> {
+  const { rows } = await query(
+    "SELECT id FROM projects WHERE user_id = $1 AND is_default = TRUE LIMIT 1",
+    [userId],
+  );
+  if (rows.length > 0) return rows[0].id;
+  const { rows: created } = await query(
+    "INSERT INTO projects (user_id, name, is_default) VALUES ($1, 'Personal', TRUE) RETURNING id",
+    [userId],
+  );
+  return created[0].id;
+}
+
 export async function seedUserTasks(userId: number): Promise<void> {
   const { rows } = await query("SELECT COUNT(*) as c FROM tasks WHERE user_id = $1", [userId]);
   if (parseInt(rows[0].c) > 0) return;
+
+  const projectId = await ensureDefaultProject(userId);
 
   const tasks: [string, string, string, number, number, string][] = [
     ["Fix auth token refresh bug", "JWT tokens expire silently — add auto-refresh logic in the API client interceptor.", "todo", 1, 1, "2026-04-02"],
@@ -114,8 +147,8 @@ export async function seedUserTasks(userId: number): Promise<void> {
   ];
   for (const [title, desc, status, prio, cat, due] of tasks) {
     await query(
-      "INSERT INTO tasks (title, description, status, priority_id, category_id, user_id, due_date) VALUES ($1,$2,$3,$4,$5,$6,$7)",
-      [title, desc, status, prio, cat, userId, due],
+      "INSERT INTO tasks (title, description, status, priority_id, category_id, user_id, project_id, due_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+      [title, desc, status, prio, cat, userId, projectId, due],
     );
   }
 

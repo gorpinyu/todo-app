@@ -33,6 +33,8 @@ async function dispatch(req: Request): Promise<Response> {
   if (url.pathname === "/api/migrate" && req.method === "POST") {
     const { query } = await import("./db.js");
     await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE`);
+    await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id)`);
     await query(`CREATE TABLE IF NOT EXISTS password_reset_tokens (
       id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       token TEXT NOT NULL UNIQUE, expires_at TIMESTAMPTZ NOT NULL,
@@ -49,6 +51,8 @@ async function dispatch(req: Request): Promise<Response> {
   const user = verifyToken(req.headers.get("authorization") ?? undefined);
   if (!user) return unauthorized();
 
+  console.log(`[AUTH] Request to ${url.pathname} by user_id=${user.user_id}, email=${user.email}`);
+  
   return handleRequest(req, user);
 }
 

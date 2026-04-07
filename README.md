@@ -1,6 +1,6 @@
 # TaskBoard
 
-A full-stack task management web application with a Kanban board, calendar view, archive, and multi-user authentication — deployed on AWS.
+A full-stack task management web application with Kanban board, calendar view, project management, and multi-user authentication — deployed on AWS.
 
 **Live:** https://d1tvflu4vk8bmb.cloudfront.net
 
@@ -15,20 +15,33 @@ A full-stack task management web application with a Kanban board, calendar view,
 - Priority labels (🔴 High / 🟡 Medium / 🟢 Low) with colour-coded left border
 - Category labels with emoji (Work, Personal, Health, Learning, Finance, Shopping)
 - Due date with overdue highlighting
+- Task completion date tracking with "completed late" indicator
 - Task detail modal with comments section
 - Sidebar filters: All Tasks, To Do, In Progress, Completed, Overdue
 
+### Project Management
+- Create multiple projects to organize tasks
+- Switch between projects from sidebar
+- Archive projects (requires no tasks or moves tasks to archive)
+- Restore archived projects
+- Permanently delete archived projects
+- Default "Personal" project protected from deletion
+- Full user data isolation - each user sees only their own projects
+
 ### Archive
-- Deleting a task moves it to the Archive (soft-delete) — data is preserved
+- Deleting a task moves it to Archived Tasks (soft-delete) — data is preserved
 - Archive view shows all archived tasks with status, due date, and category
-- Restore a task from Archive back to the main board with its original status
-- Permanently erase task details from Archive (entry remains as `[Deleted]`)
+- Restore a task from archive back to the main board with its original status
+- Permanently delete tasks from archive
+- Separate Archived Projects view for project management
 
 ### Calendar View
-- Monthly calendar showing tasks by due date
+- Monthly and weekly calendar views
+- Drag-and-drop tasks to change due dates
+- Double-click tasks to open detail modal
 - Colour-coded by status: grey (To Do), yellow (In Progress), green (Completed)
 - Overdue tasks shown in red
-- Navigate forward and backward through months
+- Navigate forward and backward through months/weeks
 - Archived tasks excluded from calendar
 
 ### Authentication
@@ -36,7 +49,7 @@ A full-stack task management web application with a Kanban board, calendar view,
 - JWT-based authentication with 7-day token expiry
 - Password reset via email (AWS SES)
 - Contextual login error messages with reset and register shortcuts
-- Sign out from sidebar
+- Secure sign out with full state cleanup
 
 ---
 
@@ -116,14 +129,14 @@ cdk deploy -c account=YOUR_ACCOUNT_ID -c region=us-east-1 --require-approval nev
 todo-app/
 ├── backend/
 │   ├── server.ts     # HTTP server + Lambda handler
-│   ├── routes.ts     # Task, archive, comment routes
+│   ├── routes.ts     # Task, project, archive, comment routes
 │   ├── auth.ts       # Register, login, password reset
 │   └── db.ts         # PostgreSQL pool + schema + seed
 ├── frontend/
 │   └── src/
-│       ├── components/   # Board, TaskCard, CalendarView, ArchiveView, modals
+│       ├── components/   # Board, TaskCard, CalendarView, ArchiveView, ProjectArchiveView, modals
 │       ├── pages/        # Login, Register, ForgotPassword, ResetPassword
-│       ├── context/      # AuthContext
+│       ├── context/      # AuthContext, ProjectContext
 │       └── api.ts        # API client
 └── infra/
     └── src/
@@ -141,3 +154,16 @@ todo-app/
 | `v1.1-auth` | Multi-user auth, PostgreSQL, AWS deployment |
 | `v1.2-archive-calendar` | Archive (soft-delete) + Calendar view |
 | `v1.3` | Password reset, restore from archive, overdue calendar highlighting |
+| `v1.4` | Task completion dates, project management, enhanced calendar (week view, drag-drop), user data isolation fixes |
+
+---
+
+## Security Features
+
+- JWT-based authentication with secure token verification
+- Password hashing with bcryptjs (12 rounds)
+- User data isolation - all database queries filtered by user_id
+- Secure logout with full localStorage cleanup and page reload
+- Protected default project from deletion
+- Comment ownership verification before deletion
+- Task ownership verification for all operations

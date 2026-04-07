@@ -42,6 +42,12 @@ export default function TaskDetailModal({ task, onClose, onDelete, onMarkComplet
     new Date(task.due_date) < new Date() &&
     task.status !== "completed";
 
+  const wasCompletedLate =
+    task.status === "completed" &&
+    task.due_date &&
+    task.completed_at &&
+    new Date(task.completed_at) > new Date(task.due_date);
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal modal-lg" onClick={(e) => e.stopPropagation()}>
@@ -60,9 +66,21 @@ export default function TaskDetailModal({ task, onClose, onDelete, onMarkComplet
             {task.category && (
               <span className="detail-badge">{task.category.emoji} {task.category.name}</span>
             )}
+          </div>
+          <div className="detail-badges" style={{ marginTop: "0.5rem" }}>
             <span className="detail-badge" style={{ color: isOverdue ? "var(--danger)" : undefined }}>
-              📅 {task.due_date ?? "No due date"}{isOverdue ? " · overdue" : ""}
+              📅 Due: {task.due_date ?? "No due date"}{isOverdue ? " · overdue" : ""}
             </span>
+            {task.status === "completed" && task.completed_at && (
+              <span className="detail-badge" style={{ color: wasCompletedLate ? "var(--warning)" : "var(--success)", fontWeight: 600 }}>
+                ✓ Completed: {new Date(task.completed_at).toLocaleDateString()}{wasCompletedLate ? " · completed late" : ""}
+              </span>
+            )}
+            {task.status === "completed" && !task.completed_at && (
+              <span className="detail-badge" style={{ color: "var(--text-muted)", fontStyle: "italic" }}>
+                ✓ Completed (date not recorded)
+              </span>
+            )}
           </div>
         </div>
 

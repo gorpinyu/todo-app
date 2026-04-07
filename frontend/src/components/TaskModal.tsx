@@ -12,6 +12,7 @@ interface Props {
 const empty: TaskFormData = {
   title: "", description: "", status: "todo",
   priority_id: "", category_id: "", due_date: "",
+  completed_at: null,
 };
 
 export default function TaskModal({ task, categories, priorities, onSave, onClose }: Props) {
@@ -25,6 +26,7 @@ export default function TaskModal({ task, categories, priorities, onSave, onClos
       priority_id: task.priority?.id ?? "",
       category_id: task.category?.id ?? "",
       due_date: task.due_date ?? "",
+      completed_at: task.completed_at ?? null,
     } : empty);
   }, [task]);
 
@@ -116,6 +118,20 @@ export default function TaskModal({ task, categories, priorities, onSave, onClos
               />
             </div>
           </div>
+          {form.status === "completed" && (
+            <div className="form-group">
+              <label>Completion Date (optional override)</label>
+              <input
+                type="datetime-local"
+                className="form-control"
+                value={form.completed_at ? new Date(form.completed_at).toISOString().slice(0, 16) : ""}
+                onChange={(e) => set("completed_at", e.target.value ? new Date(e.target.value).toISOString() : "")}
+              />
+              <small style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>
+                Leave empty to use current time when marking as completed
+              </small>
+            </div>
+          )}
           <div className="form-actions">
             <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
             <button type="submit" className="btn btn-primary">

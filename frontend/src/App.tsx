@@ -7,17 +7,20 @@ import TaskDetailModal from "./components/TaskDetailModal";
 import ConfirmDialog from "./components/ConfirmDialog";
 import ArchiveView from "./components/ArchiveView";
 import CalendarView from "./components/CalendarView";
+import ProjectArchiveView from "./components/ProjectArchiveView";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { ProjectProvider, useProject } from "./context/ProjectContext";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 
-type View = "all" | "todo" | "inprogress" | "completed" | "overdue" | "archive" | "calendar";
+type View = "all" | "todo" | "inprogress" | "completed" | "overdue" | "archive" | "calendar" | "project-archive";
 type AuthView = "login" | "register" | "forgot";
 
 function AppShell() {
   const { user, token, logout } = useAuth();
+  const { projects, activeProject, setActiveProject, reload: reloadProjects } = useProject();
   const [authView, setAuthView] = useState<AuthView>("login");
   const [tasks, setTasks] = useState<Task[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -28,20 +31,21 @@ function AppShell() {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [detailTask, setDetailTask] = useState<Task | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [confirmArchiveProjectId, setConfirmArchiveProjectId] = useState<number | null>(null);
   const [activeView, setActiveView] = useState<View>("all");
 
   const load = useCallback(async () => {
     if (!token) return;
     try {
       setError(null); setLoading(true);
-      const [t, c, p] = await Promise.all([api.getTasks(), api.getCategories(), api.getPriorities()]);
+      const [t, c, p] = await Promise.all([api.getTasks(activeProject?.id), api.getCategories(), api.getPriorities()]);
       setTasks(t); setCategories(c); setPriorities(p);
     } catch (err: any) {
       setError(err.message ?? "Failed to load tasks.");
     } finally { setLoading(false); }
-  }, [token]);
+  }, [token, activeProject]);
 
-  useEffect(() => { if (token) load(); else setLoading(false); }, [token, load]);
+  useEffect(() => { if (token) load(); else setLoading(false); }, [token, load, activeProject]);
 
   if (!user || !token) {
     const resetToken = new URLSearchParams(window.location.search).get("reset_token");
@@ -61,7 +65,7 @@ function AppShell() {
       setTasks(prev => prev.map(t => t.id === updated.id ? updated : t));
       if (detailTask?.id === updated.id) setDetailTask(updated);
     } else {
-      const created = await api.createTask(data);
+      const created = await api.createTask({ ...data, project_id: activeProject?.id });
       setTasks(prev => [created, ...prev]);
     }
     setShowTaskModal(false); setEditingTask(null);
@@ -109,10 +113,24 @@ function AppShell() {
 
   const viewTitle: Record<View, string> = {
     all: "All Tasks", todo: "To Do", inprogress: "In Progress",
-    completed: "Completed", overdue: "Overdue", archive: "Archive", calendar: "Calendar",
+    completed: "Completed", overdue: "Overdue", archive: "Archived Tasks", calendar: "Calendar",
+    "project-archive": "Archived Projects",
   };
 
-  const isBoardView = !["archive", "calendar"].includes(activeView);
+  const isBoardView = !["archive", "calendar", "project-archive"].includes(activeView);
+
+  async function handleArchiveProject(id: number) {
+    const result = await api.archiveProject(id);
+    if (result.has_tasks) {
+      alert("Project archived. It contained tasks, so it was moved to the archive.");
+    }
+    if (activeProject?.id === id) {
+      const defaultProject = projects.find(p => p.is_default);
+      if (defaultProject) setActiveProject(defaultProject);
+    }
+    await reloadProjects();
+    setConfirmArchiveProjectId(null);
+  }
 
   return (
     <div className="app">
@@ -131,7 +149,31 @@ function AppShell() {
           </div>
         </div>
         <nav className="sidebar-nav">
-          <span className="sidebar-label">Views</span>
+          <span className="sidebar-label">Projects</span>
+          {projects.map(p => (
+            <button key={p.id} className={`sidebar-item${activeProject?.id === p.id ? " active" : ""}`} onClick={() => setActiveProject(p)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                if (p.is_default) {
+                  alert("Cannot archive the default project");
+                  return;
+                }
+                setConfirmArchiveProjectId(p.id);
+              }}>
+              <span className="sidebar-item-icon">{p.emoji ?? "📁"}</span>
+              {p.name}
+              <span className="sidebar-item-count">{tasks.filter(t => (t as any).project_id === p.id).length}</span>
+            </button>
+          ))}
+          <button className="sidebar-item" onClick={async () => {
+            const name = prompt("Project name:");
+            if (!name?.trim()) return;
+            await api.createProject({ name: name.trim() });
+            await reloadProjects();
+          }}>
+            <span className="sidebar-item-icon">+</span>New Project
+          </button>
+          <span className="sidebar-label" style={{ marginTop: "0.75rem" }}>Views</span>
           {boardNavItems.map(item => (
             <button key={item.key} className={`sidebar-item${activeView === item.key ? " active" : ""}`} onClick={() => setActiveView(item.key)}>
               <span className="sidebar-item-icon">{item.icon}</span>
@@ -144,7 +186,10 @@ function AppShell() {
             <span className="sidebar-item-icon">📅</span>Calendar
           </button>
           <button className={`sidebar-item${activeView === "archive" ? " active" : ""}`} onClick={() => setActiveView("archive")}>
-            <span className="sidebar-item-icon">🗄</span>Archive
+            <span className="sidebar-item-icon">🗄</span>Archived Tasks
+          </button>
+          <button className={`sidebar-item${activeView === "project-archive" ? " active" : ""}`} onClick={() => setActiveView("project-archive")}>
+            <span className="sidebar-item-icon">📦</span>Archived Projects
           </button>
         </nav>
         <div className="sidebar-footer">
@@ -173,7 +218,13 @@ function AppShell() {
           )}
         </header>
         {activeView === "archive" && <ArchiveView />}
-        {activeView === "calendar" && <CalendarView tasks={tasks} />}
+        {activeView === "calendar" && <CalendarView tasks={tasks} onTaskClick={setDetailTask} onTaskDateChange={async (id, newDate) => {
+          const task = tasks.find(t => t.id === id);
+          if (!task) return;
+          await api.updateTask(id, { ...buildFormData(task), due_date: newDate });
+          await load();
+        }} />}
+        {activeView === "project-archive" && <ProjectArchiveView />}
         {isBoardView && (
           <Board tasks={filteredTasks} onCardClick={setDetailTask}
             onEdit={t => { setEditingTask(t); setShowTaskModal(true); }}
@@ -185,10 +236,11 @@ function AppShell() {
       {showTaskModal && <TaskModal task={editingTask} categories={categories} priorities={priorities} onSave={handleSave} onClose={() => { setShowTaskModal(false); setEditingTask(null); }} />}
       {detailTask && <TaskDetailModal task={detailTask} onClose={() => setDetailTask(null)} onDelete={id => { setDetailTask(null); setConfirmDeleteId(id); }} onMarkComplete={id => handleStatusChange(id, "completed")} onEdit={task => { setDetailTask(null); setEditingTask(task); setShowTaskModal(true); }} />}
       {confirmDeleteId !== null && <ConfirmDialog message="Move this task to archive?" onConfirm={() => handleDelete(confirmDeleteId)} onCancel={() => setConfirmDeleteId(null)} />}
+      {confirmArchiveProjectId !== null && <ConfirmDialog message="Archive this project? You can permanently delete it from the Archived Projects view." onConfirm={() => handleArchiveProject(confirmArchiveProjectId)} onCancel={() => setConfirmArchiveProjectId(null)} />}
     </div>
   );
 }
 
 export default function App() {
-  return <AuthProvider><AppShell /></AuthProvider>;
+  return <AuthProvider><ProjectProvider><AppShell /></ProjectProvider></AuthProvider>;
 }

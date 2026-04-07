@@ -2,7 +2,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
-import { query, seedUserTasks } from "./db.js";
+import { query, seedUserTasks, ensureDefaultProject } from "./db.js";
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "dev-secret-change-in-prod";
 const JWT_EXPIRES = "7d";
@@ -43,6 +43,7 @@ export async function handleAuth(req: Request): Promise<Response | null> {
       [email, password_hash],
     );
     const user = rows[0];
+    await ensureDefaultProject(user.id);
     await seedUserTasks(user.id);
     return json({ token: token({ user_id: user.id, email: user.email }), user: { id: user.id, email: user.email } }, 201);
   }
@@ -59,6 +60,7 @@ export async function handleAuth(req: Request): Promise<Response | null> {
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return json({ error: "Invalid credentials" }, 401);
 
+    await ensureDefaultProject(user.id);
     await seedUserTasks(user.id);
     return json({ token: token({ user_id: user.id, email: user.email }), user: { id: user.id, email: user.email } });
   }
