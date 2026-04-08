@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Modal, ScrollView, Platform } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Task, Category, Priority } from "../api";
+import { useTheme } from "../theme";
 
 interface Props {
   task: Task | null; categories: Category[]; priorities: Priority[];
@@ -10,6 +11,7 @@ interface Props {
 const STATUSES = [{ key: "todo", label: "To Do" }, { key: "inprogress", label: "In Progress" }, { key: "completed", label: "Done" }];
 
 export default function TaskFormModal({ task, categories, priorities, onClose, onSave }: Props) {
+  const { theme } = useTheme();
   const [title, setTitle] = useState(task?.title ?? "");
   const [description, setDescription] = useState(task?.description ?? "");
   const [status, setStatus] = useState(task?.status ?? "todo");
@@ -26,6 +28,8 @@ export default function TaskFormModal({ task, categories, priorities, onClose, o
     finally { setSaving(false); }
   }
 
+  const s = createStyles(theme);
+
   return (
     <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={s.container}>
@@ -38,9 +42,9 @@ export default function TaskFormModal({ task, categories, priorities, onClose, o
         </View>
         <ScrollView style={s.scroll} keyboardShouldPersistTaps="handled">
           <Text style={s.label}>TITLE</Text>
-          <TextInput style={s.input} placeholder="Task title" placeholderTextColor="#9aa5b4" value={title} onChangeText={setTitle} autoFocus />
+          <TextInput style={s.input} placeholder="Task title" placeholderTextColor={theme.textMuted} value={title} onChangeText={setTitle} autoFocus />
           <Text style={s.label}>DESCRIPTION</Text>
-          <TextInput style={[s.input, s.textarea]} placeholder="Optional description" placeholderTextColor="#9aa5b4" value={description} onChangeText={setDescription} multiline numberOfLines={3} />
+          <TextInput style={[s.input, s.textarea]} placeholder="Optional description" placeholderTextColor={theme.textMuted} value={description} onChangeText={setDescription} multiline numberOfLines={3} />
           <Text style={s.label}>STATUS</Text>
           <View style={s.row}>
             {STATUSES.map(st => (
@@ -105,26 +109,26 @@ export default function TaskFormModal({ task, categories, priorities, onClose, o
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f0f2f5" },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16, backgroundColor: "#fff", borderBottomWidth: 1, borderBottomColor: "#e2e6ed" },
-  cancel: { fontSize: 16, color: "#4a5568" },
-  headerTitle: { fontSize: 17, fontWeight: "700", color: "#0f1c2e" },
-  save: { fontSize: 16, fontWeight: "700", color: "#1a56db" },
+const createStyles = (theme: any) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: theme.bgPrimary },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16, backgroundColor: theme.bgSecondary, borderBottomWidth: 1, borderBottomColor: theme.borderDefault },
+  cancel: { fontSize: 16, color: theme.textSecondary },
+  headerTitle: { fontSize: 17, fontWeight: "700", color: theme.textPrimary },
+  save: { fontSize: 16, fontWeight: "700", color: theme.brandPrimary },
   saveDisabled: { opacity: 0.4 },
   scroll: { flex: 1, padding: 20 },
-  label: { fontSize: 11, fontWeight: "600", color: "#9aa5b4", letterSpacing: 1, marginBottom: 8, marginTop: 16 },
-  input: { backgroundColor: "#fff", borderWidth: 1, borderColor: "#e2e6ed", borderRadius: 10, padding: 14, fontSize: 15, color: "#0f1c2e" },
+  label: { fontSize: 11, fontWeight: "600", color: theme.textMuted, letterSpacing: 1, marginBottom: 8, marginTop: 16 },
+  input: { backgroundColor: theme.bgSecondary, borderWidth: 1, borderColor: theme.borderDefault, borderRadius: 10, padding: 14, fontSize: 15, color: theme.textPrimary },
   textarea: { minHeight: 80, textAlignVertical: "top" },
   row: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  pill: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: "#fff", borderWidth: 1, borderColor: "#e2e6ed" },
-  pillActive: { backgroundColor: "#1a56db", borderColor: "#1a56db" },
-  pillText: { fontSize: 13, fontWeight: "600", color: "#4a5568" },
-  pillTextActive: { color: "#fff" },
-  dateBtn: { backgroundColor: "#fff", borderWidth: 1, borderColor: "#e2e6ed", borderRadius: 10, padding: 14, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  dateBtnText: { fontSize: 15, color: "#0f1c2e" },
-  datePlaceholder: { color: "#9aa5b4" },
-  dateClear: { fontSize: 16, color: "#9aa5b4" },
-  dateConfirm: { backgroundColor: "#1a56db", borderRadius: 10, padding: 12, alignItems: "center", marginTop: 8 },
-  dateConfirmText: { color: "#fff", fontSize: 15, fontWeight: "700" },
+  pill: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: theme.bgSecondary, borderWidth: 1, borderColor: theme.borderDefault },
+  pillActive: { backgroundColor: theme.brandPrimary, borderColor: theme.brandPrimary },
+  pillText: { fontSize: 13, fontWeight: "600", color: theme.textSecondary },
+  pillTextActive: { color: theme.textInverse },
+  dateBtn: { backgroundColor: theme.bgSecondary, borderWidth: 1, borderColor: theme.borderDefault, borderRadius: 10, padding: 14, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  dateBtnText: { fontSize: 15, color: theme.textPrimary },
+  datePlaceholder: { color: theme.textMuted },
+  dateClear: { fontSize: 16, color: theme.textMuted },
+  dateConfirm: { backgroundColor: theme.brandPrimary, borderRadius: 10, padding: 12, alignItems: "center", marginTop: 8 },
+  dateConfirmText: { color: theme.textInverse, fontSize: 15, fontWeight: "700" },
 });

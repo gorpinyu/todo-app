@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
 import { Task, Comment, api } from "../api";
+import { useTheme } from "../theme";
 
 interface Props {
   task: Task; onClose: () => void; onEdit: () => void;
@@ -11,16 +12,18 @@ const STATUS_NEXT: Record<string, { label: string; next: string }> = {
   inprogress: { label: "Complete", next: "completed" },
   completed: { label: "Reopen", next: "todo" },
 };
-const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
-  todo: { bg: "#eff4ff", text: "#1a56db" },
-  inprogress: { bg: "#fffbeb", text: "#d97706" },
-  completed: { bg: "#ecfdf5", text: "#059669" },
-};
 
 export default function TaskDetailModal({ task, onClose, onEdit, onDelete, onStatusChange }: Props) {
+  const { theme } = useTheme();
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState("");
   const [loadingComments, setLoadingComments] = useState(true);
+
+  const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
+    todo: { bg: theme.statusTodo.bg, text: theme.statusTodo.text },
+    inprogress: { bg: theme.statusInProgress.bg, text: theme.statusInProgress.text },
+    completed: { bg: theme.statusCompleted.bg, text: theme.statusCompleted.text },
+  };
 
   useEffect(() => {
     api.getComments(task.id).then(c => { setComments(c); setLoadingComments(false); });
@@ -33,6 +36,7 @@ export default function TaskDetailModal({ task, onClose, onEdit, onDelete, onSta
     setNewComment("");
   }
 
+  const s = createStyles(theme);
   const sc = STATUS_COLORS[task.status] ?? STATUS_COLORS.todo;
   const next = STATUS_NEXT[task.status];
   const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -67,7 +71,7 @@ export default function TaskDetailModal({ task, onClose, onEdit, onDelete, onSta
             <Text style={s.nextBtnText}>{next.label}</Text>
           </TouchableOpacity>
           <Text style={s.sectionLabel}>COMMENTS</Text>
-          {loadingComments ? <ActivityIndicator color="#1a56db" style={{ marginVertical: 12 }} /> : (
+          {loadingComments ? <ActivityIndicator color={theme.brandPrimary} style={{ marginVertical: 12 }} /> : (
             <>
               {comments.map(c => (
                 <View key={c.id} style={s.comment}>
@@ -78,7 +82,7 @@ export default function TaskDetailModal({ task, onClose, onEdit, onDelete, onSta
                 </View>
               ))}
               <View style={s.commentInput}>
-                <TextInput style={s.commentField} placeholder="Add a comment…" placeholderTextColor="#9aa5b4"
+                <TextInput style={s.commentField} placeholder="Add a comment…" placeholderTextColor={theme.textMuted}
                   value={newComment} onChangeText={setNewComment} multiline />
                 <TouchableOpacity style={s.commentSend} onPress={handleAddComment} disabled={!newComment.trim()}>
                   <Text style={s.commentSendText}>Send</Text>
@@ -93,34 +97,34 @@ export default function TaskDetailModal({ task, onClose, onEdit, onDelete, onSta
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f0f2f5" },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16, backgroundColor: "#fff", borderBottomWidth: 1, borderBottomColor: "#e2e6ed" },
-  close: { fontSize: 18, color: "#4a5568", padding: 4 },
+const createStyles = (theme: any) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: theme.bgPrimary },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16, backgroundColor: theme.bgSecondary, borderBottomWidth: 1, borderBottomColor: theme.borderDefault },
+  close: { fontSize: 18, color: theme.textSecondary, padding: 4 },
   headerActions: { flexDirection: "row", gap: 8 },
-  actionBtn: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8, backgroundColor: "#eff4ff" },
-  actionText: { fontSize: 14, fontWeight: "600", color: "#1a56db" },
-  dangerBtn: { backgroundColor: "#fef2f2" },
-  dangerText: { fontSize: 14, fontWeight: "600", color: "#dc2626" },
+  actionBtn: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8, backgroundColor: theme.statusTodo.bg },
+  actionText: { fontSize: 14, fontWeight: "600", color: theme.brandPrimary },
+  dangerBtn: { backgroundColor: theme.dangerBg },
+  dangerText: { fontSize: 14, fontWeight: "600", color: theme.danger },
   scroll: { flex: 1, padding: 20 },
   titleRow: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 12 },
-  title: { flex: 1, fontSize: 20, fontWeight: "700", color: "#0f1c2e", lineHeight: 26 },
+  title: { flex: 1, fontSize: 20, fontWeight: "700", color: theme.textPrimary, lineHeight: 26 },
   statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
   statusText: { fontSize: 12, fontWeight: "700" },
-  desc: { fontSize: 15, color: "#4a5568", lineHeight: 22, marginBottom: 16 },
+  desc: { fontSize: 15, color: theme.textSecondary, lineHeight: 22, marginBottom: 16 },
   metaRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 20 },
-  metaChip: { backgroundColor: "#fff", borderWidth: 1, borderColor: "#e2e6ed", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 },
-  metaChipText: { fontSize: 13, color: "#4a5568" },
-  overdueChip: { backgroundColor: "#fef2f2", borderColor: "#fca5a5" },
-  overdueText: { color: "#dc2626" },
-  nextBtn: { backgroundColor: "#1a56db", borderRadius: 10, padding: 14, alignItems: "center", marginBottom: 24 },
-  nextBtnText: { color: "#fff", fontSize: 15, fontWeight: "700" },
-  sectionLabel: { fontSize: 11, fontWeight: "600", color: "#9aa5b4", letterSpacing: 1, marginBottom: 12 },
-  comment: { backgroundColor: "#fff", borderRadius: 10, padding: 12, marginBottom: 8, flexDirection: "row", alignItems: "flex-start", gap: 8 },
-  commentText: { flex: 1, fontSize: 14, color: "#0f1c2e", lineHeight: 20 },
-  commentDelete: { color: "#9aa5b4", fontSize: 14, padding: 2 },
-  commentInput: { backgroundColor: "#fff", borderRadius: 10, padding: 12, flexDirection: "row", alignItems: "flex-end", gap: 8, marginTop: 4 },
-  commentField: { flex: 1, fontSize: 14, color: "#0f1c2e", maxHeight: 80 },
-  commentSend: { backgroundColor: "#1a56db", borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
-  commentSendText: { color: "#fff", fontSize: 13, fontWeight: "700" },
+  metaChip: { backgroundColor: theme.bgSecondary, borderWidth: 1, borderColor: theme.borderDefault, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 },
+  metaChipText: { fontSize: 13, color: theme.textSecondary },
+  overdueChip: { backgroundColor: theme.dangerBg, borderColor: theme.danger },
+  overdueText: { color: theme.danger },
+  nextBtn: { backgroundColor: theme.brandPrimary, borderRadius: 10, padding: 14, alignItems: "center", marginBottom: 24 },
+  nextBtnText: { color: theme.textInverse, fontSize: 15, fontWeight: "700" },
+  sectionLabel: { fontSize: 11, fontWeight: "600", color: theme.textMuted, letterSpacing: 1, marginBottom: 12 },
+  comment: { backgroundColor: theme.bgSecondary, borderRadius: 10, padding: 12, marginBottom: 8, flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  commentText: { flex: 1, fontSize: 14, color: theme.textPrimary, lineHeight: 20 },
+  commentDelete: { color: theme.textMuted, fontSize: 14, padding: 2 },
+  commentInput: { backgroundColor: theme.bgSecondary, borderRadius: 10, padding: 12, flexDirection: "row", alignItems: "flex-end", gap: 8, marginTop: 4 },
+  commentField: { flex: 1, fontSize: 14, color: theme.textPrimary, maxHeight: 80 },
+  commentSend: { backgroundColor: theme.brandPrimary, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
+  commentSendText: { color: theme.textInverse, fontSize: 13, fontWeight: "700" },
 });

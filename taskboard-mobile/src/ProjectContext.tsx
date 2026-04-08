@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
-import type { Project } from "../types";
-import { api } from "../api";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { api, Project } from "./api";
 
 interface ProjectContextValue {
   projects: Project[];
@@ -10,24 +10,28 @@ interface ProjectContextValue {
 }
 
 const ProjectContext = createContext<ProjectContextValue | null>(null);
-const STORAGE_KEY = "active_project_id";
+const STORAGE_KEY = "@taskboard_active_project_id";
 
 export function ProjectProvider({ children }: { children: React.ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProject, setActiveProjectState] = useState<Project | null>(null);
 
   const reload = useCallback(async () => {
-    const list = await api.getProjects();
-    setProjects(list);
-    const savedId = localStorage.getItem(STORAGE_KEY);
-    const saved = savedId ? list.find(p => p.id === parseInt(savedId)) : null;
-    setActiveProjectState(saved ?? list.find(p => p.is_default) ?? list[0] ?? null);
+    try {
+      const list = await api.getProjects();
+      setProjects(list);
+      const savedId = await AsyncStorage.getItem(STORAGE_KEY);
+      const saved = savedId ? list.find(p => p.id === parseInt(savedId)) : null;
+      setActiveProjectState(saved ?? list.find(p => p.is_default) ?? list[0] ?? null);
+    } catch (err) {
+      console.error("Failed to load projects:", err);
+    }
   }, []);
 
   useEffect(() => { reload(); }, []);
 
-  function setActiveProject(p: Project) {
-    localStorage.setItem(STORAGE_KEY, String(p.id));
+  async function setActiveProject(p: Project) {
+    await AsyncStorage.setItem(STORAGE_KEY, String(p.id));
     setActiveProjectState(p);
   }
 

@@ -38,7 +38,15 @@ export default function CalendarView({ tasks, onTaskClick, onTaskDateChange }: P
     return new Date(task.due_date) < todayDate;
   }
 
-  const activeTasks = tasks.filter(t => !t.archived && t.due_date);
+  const activeTasks = tasks.filter(t => !t.archived && (t.due_date || t.completed_at));
+
+  function getTaskDisplayDate(task: Task): string | null {
+    // Show completed tasks by completion date, others by due date
+    if (task.status === "completed" && task.completed_at) {
+      return task.completed_at.split('T')[0];
+    }
+    return task.due_date;
+  }
 
   function prevPeriod() {
     if (viewMode === "month") {
@@ -76,7 +84,12 @@ export default function CalendarView({ tasks, onTaskClick, onTaskDateChange }: P
     e.preventDefault();
     if (!draggedTask) return;
     
-    const newDueDate = targetDate.toISOString().split('T')[0];
+    // Format date correctly to avoid timezone issues
+    const year = targetDate.getFullYear();
+    const month = String(targetDate.getMonth() + 1).padStart(2, '0');
+    const day = String(targetDate.getDate()).padStart(2, '0');
+    const newDueDate = `${year}-${month}-${day}`;
+    
     onTaskDateChange(draggedTask.id, newDueDate);
     setDraggedTask(null);
   }
@@ -88,7 +101,9 @@ export default function CalendarView({ tasks, onTaskClick, onTaskDateChange }: P
 
     const byDay: Record<number, Task[]> = {};
     for (const task of activeTasks) {
-      const d = new Date(task.due_date!);
+      const displayDate = getTaskDisplayDate(task);
+      if (!displayDate) continue;
+      const d = new Date(displayDate);
       if (d.getFullYear() === year && d.getMonth() === month) {
         const day = d.getDate();
         if (!byDay[day]) byDay[day] = [];
@@ -100,7 +115,11 @@ export default function CalendarView({ tasks, onTaskClick, onTaskDateChange }: P
       ...Array(firstDay).fill(null),
       ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
     ];
-    while (cells.length % 7 !== 0) cells.push(null);
+    // Pad to complete the last row (ensure multiple of 7 for grid)
+    const remainder = cells.length % 7;
+    if (remainder !== 0) {
+      cells.push(...Array(7 - remainder).fill(null));
+    }
 
     const isToday = (day: number) =>
       day === todayDate.getDate() && month === todayDate.getMonth() && year === todayDate.getFullYear();
@@ -179,9 +198,11 @@ export default function CalendarView({ tasks, onTaskClick, onTaskDateChange }: P
 
   const byWeekDay: Record<string, Task[]> = {};
   for (const task of activeTasks) {
-    const taskDate = new Date(task.due_date!);
+    const displayDate = getTaskDisplayDate(task);
+    if (!displayDate) continue;
+    const taskDate = new Date(displayDate);
     taskDate.setHours(0, 0, 0, 0);
-    const dateKey = taskDate.toISOString().split('T')[0];
+    const dateKey = displayDate;
     if (!byWeekDay[dateKey]) byWeekDay[dateKey] = [];
     byWeekDay[dateKey].push(task);
   }

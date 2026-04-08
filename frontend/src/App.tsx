@@ -10,6 +10,7 @@ import CalendarView from "./components/CalendarView";
 import ProjectArchiveView from "./components/ProjectArchiveView";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { ProjectProvider, useProject } from "./context/ProjectContext";
+import { ThemeProvider, useTheme, type ThemeMode } from "./context/ThemeContext";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
@@ -21,6 +22,7 @@ type AuthView = "login" | "register" | "forgot";
 function AppShell() {
   const { user, token, logout } = useAuth();
   const { projects, activeProject, setActiveProject, reload: reloadProjects } = useProject();
+  const { themeMode, setThemeMode } = useTheme();
   const [authView, setAuthView] = useState<AuthView>("login");
   const [tasks, setTasks] = useState<Task[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -33,6 +35,8 @@ function AppShell() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [confirmArchiveProjectId, setConfirmArchiveProjectId] = useState<number | null>(null);
   const [activeView, setActiveView] = useState<View>("all");
+  const [showSettings, setShowSettings] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -107,9 +111,17 @@ function AppShell() {
     { key: "overdue" as View,    icon: "⚠", label: "Overdue",     count: overdue },
   ];
 
-  const filteredTasks = activeView === "all" ? tasks
+  let filteredTasks = activeView === "all" ? tasks
     : activeView === "overdue" ? tasks.filter(t => t.due_date && new Date(t.due_date) < new Date() && t.status !== "completed")
     : tasks.filter(t => t.status === activeView);
+  
+  if (searchQuery.trim()) {
+    const query = searchQuery.toLowerCase();
+    filteredTasks = filteredTasks.filter(t => 
+      t.title.toLowerCase().includes(query) || 
+      (t.description && t.description.toLowerCase().includes(query))
+    );
+  }
 
   const viewTitle: Record<View, string> = {
     all: "All Tasks", todo: "To Do", inprogress: "In Progress",
@@ -154,10 +166,6 @@ function AppShell() {
             <button key={p.id} className={`sidebar-item${activeProject?.id === p.id ? " active" : ""}`} onClick={() => setActiveProject(p)}
               onContextMenu={(e) => {
                 e.preventDefault();
-                if (p.is_default) {
-                  alert("Cannot archive the default project");
-                  return;
-                }
                 setConfirmArchiveProjectId(p.id);
               }}>
               <span className="sidebar-item-icon">{p.emoji ?? "📁"}</span>
@@ -197,6 +205,7 @@ function AppShell() {
             <span className="sidebar-user-avatar">{user.email[0].toUpperCase()}</span>
             <span className="sidebar-user-email">{user.email}</span>
           </div>
+          <button className="sidebar-settings-btn" onClick={() => setShowSettings(true)}>⚙ Settings</button>
           {isBoardView && (
             <button className="sidebar-new-btn" onClick={() => { setEditingTask(null); setShowTaskModal(true); }}>+ New Task</button>
           )}
@@ -209,6 +218,13 @@ function AppShell() {
           <h1 className="topbar-title">{viewTitle[activeView]}</h1>
           {isBoardView && (
             <div className="topbar-right">
+              <input 
+                type="text" 
+                className="search-input" 
+                placeholder="Search tasks..." 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
               <span className="stat-chip">Total <strong>{tasks.length}</strong></span>
               <span className="stat-chip progress-chip">
                 <div className="progress-track"><div className="progress-fill" style={{ width: `${pct}%` }} /></div>
@@ -221,8 +237,8 @@ function AppShell() {
         {activeView === "calendar" && <CalendarView tasks={tasks} onTaskClick={setDetailTask} onTaskDateChange={async (id, newDate) => {
           const task = tasks.find(t => t.id === id);
           if (!task) return;
-          await api.updateTask(id, { ...buildFormData(task), due_date: newDate });
-          await load();
+          const updated = await api.updateTask(id, { ...buildFormData(task), due_date: newDate });
+          setTasks(prev => prev.map(t => t.id === updated.id ? updated : t));
         }} />}
         {activeView === "project-archive" && <ProjectArchiveView />}
         {isBoardView && (
@@ -237,10 +253,47 @@ function AppShell() {
       {detailTask && <TaskDetailModal task={detailTask} onClose={() => setDetailTask(null)} onDelete={id => { setDetailTask(null); setConfirmDeleteId(id); }} onMarkComplete={id => handleStatusChange(id, "completed")} onEdit={task => { setDetailTask(null); setEditingTask(task); setShowTaskModal(true); }} />}
       {confirmDeleteId !== null && <ConfirmDialog message="Move this task to archive?" onConfirm={() => handleDelete(confirmDeleteId)} onCancel={() => setConfirmDeleteId(null)} />}
       {confirmArchiveProjectId !== null && <ConfirmDialog message="Archive this project? You can permanently delete it from the Archived Projects view." onConfirm={() => handleArchiveProject(confirmArchiveProjectId)} onCancel={() => setConfirmArchiveProjectId(null)} />}
+      {showSettings && (
+        <div className="modal-overlay" onClick={() => setShowSettings(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Settings</h2>
+              <button className="modal-close" onClick={() => setShowSettings(false)}>✕</button>
+            </div>
+            <div style={{ padding: "1.5rem" }}>
+              <h3 style={{ fontSize: "0.875rem", fontWeight: 700, color: "var(--text-muted)", marginBottom: "0.75rem", letterSpacing: "0.5px" }}>APPEARANCE</h3>
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                {[
+                  { mode: "light" as ThemeMode, icon: "☀️", label: "Light", desc: "Always use light theme" },
+                  { mode: "dark" as ThemeMode, icon: "🌙", label: "Dark", desc: "Always use dark theme" },
+                  { mode: "system" as ThemeMode, icon: "⚙️", label: "System", desc: "Match system settings" }
+                ].map(opt => (
+                  <button key={opt.mode} onClick={() => setThemeMode(opt.mode)}
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      padding: "0.875rem", borderRadius: "8px", border: "1px solid var(--border)",
+                      background: themeMode === opt.mode ? "var(--accent-dim)" : "var(--bg-surface)",
+                      cursor: "pointer", transition: "var(--transition)"
+                    }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                      <span style={{ fontSize: "1.25rem" }}>{opt.icon}</span>
+                      <div style={{ textAlign: "left" }}>
+                        <div style={{ fontWeight: 600, color: "var(--text-primary)", fontSize: "0.9375rem" }}>{opt.label}</div>
+                        <div style={{ fontSize: "0.8125rem", color: "var(--text-muted)", marginTop: "0.125rem" }}>{opt.desc}</div>
+                      </div>
+                    </div>
+                    {themeMode === opt.mode && <span style={{ color: "var(--accent)", fontSize: "1.125rem", fontWeight: 700 }}>✓</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 export default function App() {
-  return <AuthProvider><ProjectProvider><AppShell /></ProjectProvider></AuthProvider>;
+  return <ThemeProvider><AuthProvider><ProjectProvider><AppShell /></ProjectProvider></AuthProvider></ThemeProvider>;
 }

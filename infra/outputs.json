@@ -1,0 +1,7 @@
+{
+  "todo-dev": {
+    "ApiUrl": "https://2v4kx3ter9.execute-api.us-east-1.amazonaws.com",
+    "DbSecretArn": "arn:aws:secretsmanager:us-east-1:296122127181:secret:DbSecretResource978BC7B0-ZBT7gtmLYbxB-npQOSH",
+    "AppUrl": "https://d1tvflu4vk8bmb.cloudfront.net"
+  }
+}

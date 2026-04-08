@@ -43,6 +43,21 @@ async function dispatch(req: Request): Promise<Response> {
     return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
   }
 
+  // Admin endpoint to delete user (use with caution!)
+  if (url.pathname === "/api/admin/delete-user" && req.method === "POST") {
+    const { email } = await req.json();
+    if (!email) return new Response(JSON.stringify({ error: "Email required" }), { status: 400, headers: corsHeaders });
+    
+    const { query } = await import("./db.js");
+    const { rows } = await query("SELECT id FROM users WHERE email = $1", [email]);
+    if (rows.length === 0) {
+      return new Response(JSON.stringify({ error: "User not found" }), { status: 404, headers: corsHeaders });
+    }
+    
+    await query("DELETE FROM users WHERE id = $1", [rows[0].id]);
+    return new Response(JSON.stringify({ success: true, message: `Deleted user ${email}` }), { status: 200, headers: corsHeaders });
+  }
+
   if (AUTH_BYPASS.includes(url.pathname)) {
     const res = (await handleAuth(req)) ?? (await handlePasswordReset(req));
     return res ?? new Response(JSON.stringify({ error: "Not found" }), { status: 404, headers: corsHeaders });

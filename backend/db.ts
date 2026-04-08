@@ -95,28 +95,34 @@ export async function initDb(): Promise<void> {
   )`);
 
   const { rows } = await query("SELECT COUNT(*) as c FROM categories");
-  if (parseInt(rows[0].c) > 0) return;
+  if (parseInt(rows[0].c) === 0) {
+    // Seed categories and priorities (shared across all users)
+    const cats = [["Work","💼"],["Personal","🏠"],["Health","💪"],["Learning","📚"],["Finance","💰"],["Shopping","🛒"]];
+    for (const [name, emoji] of cats) {
+      await query("INSERT INTO categories (name, emoji) VALUES ($1, $2)", [name, emoji]);
+    }
 
-  // Seed categories and priorities (shared across all users)
-  const cats = [["Work","💼"],["Personal","🏠"],["Health","💪"],["Learning","📚"],["Finance","💰"],["Shopping","🛒"]];
-  for (const [name, emoji] of cats) {
-    await query("INSERT INTO categories (name, emoji) VALUES ($1, $2)", [name, emoji]);
+    const prios = [["High","🔴"],["Medium","🟡"],["Low","🟢"]];
+    for (const [name, emoji] of prios) {
+      await query("INSERT INTO priorities (name, emoji) VALUES ($1, $2)", [name, emoji]);
+    }
   }
 
-  const prios = [["High","🔴"],["Medium","🟡"],["Low","🟢"]];
-  for (const [name, emoji] of prios) {
-    await query("INSERT INTO priorities (name, emoji) VALUES ($1, $2)", [name, emoji]);
-  }
+  // v1.4.1 Migration: Update all default projects to "Sandbox Testbed" (runs every time)
+  await query(
+    "UPDATE projects SET name = 'Sandbox Testbed' WHERE is_default = TRUE AND name != 'Sandbox Testbed'"
+  ).catch(() => {});
 }
 
 export async function ensureDefaultProject(userId: number): Promise<number> {
+  // v1.4.1 - Changed default project name to "Sandbox Testbed"
   const { rows } = await query(
     "SELECT id FROM projects WHERE user_id = $1 AND is_default = TRUE LIMIT 1",
     [userId],
   );
   if (rows.length > 0) return rows[0].id;
   const { rows: created } = await query(
-    "INSERT INTO projects (user_id, name, is_default) VALUES ($1, 'Personal', TRUE) RETURNING id",
+    "INSERT INTO projects (user_id, name, is_default) VALUES ($1, 'Sandbox Testbed', TRUE) RETURNING id",
     [userId],
   );
   return created[0].id;

@@ -1,18 +1,17 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, TouchableOpacity, StyleSheet, SectionList, ActivityIndicator } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, SectionList, ActivityIndicator, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { api, Task, Category, Priority } from "../api";
+import { useTheme } from "../theme";
+import { useProject } from "../ProjectContext";
 import TaskDetailModal from "../components/TaskDetailModal";
 import TaskFormModal from "../components/TaskFormModal";
 
 const DAYS = ["S", "M", "T", "W", "T", "F", "S"];
-const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
-  todo:       { bg: "#eff4ff", text: "#1a56db", dot: "#1a56db" },
-  inprogress: { bg: "#fffbeb", text: "#d97706", dot: "#d97706" },
-  completed:  { bg: "#ecfdf5", text: "#059669", dot: "#059669" },
-};
 
 export default function CalendarScreen() {
+  const { theme } = useTheme();
+  const { activeProject } = useProject();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [priorities, setPriorities] = useState<Priority[]>([]);
@@ -21,24 +20,48 @@ export default function CalendarScreen() {
   const [editTask, setEditTask] = useState<Task | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
+  const [viewMode, setViewMode] = useState<"month" | "week">("month");
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
 
+  const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
+    todo:       { bg: theme.statusTodo.bg, text: theme.statusTodo.text, dot: theme.statusTodo.text },
+    inprogress: { bg: theme.statusInProgress.bg, text: theme.statusInProgress.text, dot: theme.statusInProgress.text },
+    completed:  { bg: theme.statusCompleted.bg, text: theme.statusCompleted.text, dot: theme.statusCompleted.text },
+  };
+
   useEffect(() => {
-    Promise.all([api.getTasks(), api.getCategories(), api.getPriorities()]).then(([t, c, p]) => {
+    if (!activeProject) return;
+    Promise.all([api.getTasks(activeProject.id), api.getCategories(), api.getPriorities()]).then(([t, c, p]) => {
       setTasks(t); setCategories(c); setPriorities(p); setLoading(false);
     });
-  }, []);
+  }, [activeProject]);
 
   const monthLabel = new Date(year, month).toLocaleString("default", { month: "long", year: "numeric" });
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const todayMidnight = new Date(); todayMidnight.setHours(0, 0, 0, 0);
 
+  // Helper to parse date string in local timezone
+  const parseLocalDate = (dateStr: string): Date => {
+    const [y, m, d] = dateStr.split('T')[0].split('-').map(Number);
+    return new Date(y, m - 1, d);
+  };
+
+  // Get display date for task - completed tasks show by completion date, others by due date
+  const getTaskDisplayDate = (task: Task): string | null => {
+    if (task.status === "completed" && task.completed_at) {
+      return task.completed_at.split('T')[0];
+    }
+    return task.due_date;
+  };
+
   const byDay: Record<number, Task[]> = {};
-  for (const task of tasks.filter(t => !t.archived && t.due_date)) {
-    const d = new Date(task.due_date!);
+  for (const task of tasks.filter(t => !t.archived)) {
+    const displayDate = getTaskDisplayDate(task);
+    if (!displayDate) continue;
+    const d = parseLocalDate(displayDate);
     if (d.getFullYear() === year && d.getMonth() === month) {
       const day = d.getDate();
       if (!byDay[day]) byDay[day] = [];
@@ -75,7 +98,56 @@ export default function CalendarScreen() {
     setDetailTask(null);
   }
 
-  if (loading) return <View style={s.center}><ActivityIndicator size="large" color="#1a56db" /></View>;
+  const s = createStyles(theme);
+
+  if (loading) return <View style={[s.center, { backgroundColor: theme.bgPrimary }]}><ActivityIndicator size="large" color={theme.brandPrimary} /></View>;
+
+  const WeekView = () => {
+    const startOfWeek = new Date(year, month, today.getDate() - today.getDay());
+    const weekDays = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(startOfWeek);
+      d.setDate(startOfWeek.getDate() + i);
+      return d;
+    });
+
+    return (
+      <View style={{ paddingHorizontal: 12, paddingBottom: 12 }}>
+        {weekDays.map((d, i) => {
+          const dayTasks = tasks.filter(t => {
+            if (t.archived) return false;
+            const displayDate = getTaskDisplayDate(t);
+            if (!displayDate) return false;
+            const taskDate = parseLocalDate(displayDate);
+            return taskDate.toDateString() === d.toDateString();
+          });
+          
+          // Skip days with no tasks
+          if (dayTasks.length === 0) return null;
+          
+          const isTod = d.toDateString() === today.toDateString();
+          return (
+            <View key={i} style={[s.weekDayRow, isTod && s.weekDayRowToday]}>
+              <View style={s.weekDayRowHeader}>
+                <Text style={s.weekDayRowName}>{d.toLocaleDateString('default', { weekday: 'short' })}</Text>
+                <Text style={[s.weekDayRowNum, isTod && s.weekDayRowNumToday]}>{d.getDate()}</Text>
+              </View>
+              <View style={s.weekDayRowTasks}>
+                {dayTasks.map(task => {
+                  const sc = STATUS_COLORS[task.status] ?? STATUS_COLORS.todo;
+                  return (
+                    <TouchableOpacity key={task.id} style={s.weekTaskRowCard} onPress={() => setDetailTask(task)}>
+                      <View style={[s.weekTaskRowDot, { backgroundColor: sc.dot }]} />
+                      <Text style={s.weekTaskRowTitle} numberOfLines={2}>{task.title}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          );
+        })}
+      </View>
+    );
+  };
 
   const CalendarHeader = () => (
     <>
@@ -88,28 +160,46 @@ export default function CalendarScreen() {
           <Text style={s.navText}>›</Text>
         </TouchableOpacity>
       </View>
-      <View style={s.dayNames}>
-        {DAYS.map((d, i) => <Text key={i} style={s.dayName}>{d}</Text>)}
+      <View style={{ flexDirection: "row", paddingHorizontal: 20, paddingBottom: 8, gap: 8 }}>
+        <TouchableOpacity 
+          style={[s.viewToggle, viewMode === "month" && s.viewToggleActive]}
+          onPress={() => { setViewMode("month"); setSelectedDay(null); }}>
+          <Text style={[s.viewToggleText, viewMode === "month" && s.viewToggleTextActive]}>Month</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[s.viewToggle, viewMode === "week" && s.viewToggleActive]}
+          onPress={() => { setViewMode("week"); setSelectedDay(null); }}>
+          <Text style={[s.viewToggleText, viewMode === "week" && s.viewToggleTextActive]}>Week</Text>
+        </TouchableOpacity>
       </View>
-      <View style={s.grid}>
-        {weeks.map((week, wi) => (
-          <View key={wi} style={s.week}>
-            {week.map((day, di) => {
-              const hasTasks = day ? (byDay[day]?.length ?? 0) > 0 : false;
-              const isSelected = day === selectedDay;
-              const isTod = day ? isToday(day) : false;
-              return (
-                <TouchableOpacity key={di} style={[s.dayCell, isSelected && s.dayCellSelected]}
-                  onPress={() => day ? setSelectedDay(day === selectedDay ? null : day) : undefined}
-                  disabled={!day} activeOpacity={day ? 0.7 : 1}>
-                  <Text style={[s.dayNum, isTod && s.todayNum, isSelected && s.selectedNum]}>{day ?? ""}</Text>
-                  {hasTasks && <View style={[s.dot, isSelected && s.dotSelected]} />}
-                </TouchableOpacity>
-              );
-            })}
+      {viewMode === "month" ? (
+        <>
+          <View style={s.dayNames}>
+            {DAYS.map((d, i) => <Text key={i} style={s.dayName}>{d}</Text>)}
           </View>
-        ))}
-      </View>
+          <View style={s.grid}>
+            {weeks.map((week, wi) => (
+              <View key={wi} style={s.week}>
+                {week.map((day, di) => {
+                  const hasTasks = day ? (byDay[day]?.length ?? 0) > 0 : false;
+                  const isSelected = day === selectedDay;
+                  const isTod = day ? isToday(day) : false;
+                  return (
+                    <TouchableOpacity key={di} style={[s.dayCell, isSelected && s.dayCellSelected]}
+                      onPress={() => day ? setSelectedDay(day === selectedDay ? null : day) : undefined}
+                      disabled={!day} activeOpacity={day ? 0.7 : 1}>
+                      <Text style={[s.dayNum, isTod && s.todayNum, isSelected && s.selectedNum]}>{day ?? ""}</Text>
+                      {hasTasks && <View style={[s.dot, isSelected && s.dotSelected]} />}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ))}
+          </View>
+        </>
+      ) : (
+        <WeekView />
+      )}
       <View style={s.listHeader}>
         <Text style={s.listHeaderText}>
           {selectedDay
@@ -134,14 +224,18 @@ export default function CalendarScreen() {
           <View style={s.sectionHeader}><Text style={s.sectionHeaderText}>{section.title}</Text></View>
         ) : null}
         renderItem={({ item }) => {
-          const isOverdue = new Date(item.due_date!) < todayMidnight && item.status !== "completed";
+          const displayDate = getTaskDisplayDate(item);
+          const isOverdue = item.due_date && new Date(item.due_date) < todayMidnight && item.status !== "completed";
           const sc = STATUS_COLORS[item.status] ?? STATUS_COLORS.todo;
           return (
             <TouchableOpacity style={s.taskRow} onPress={() => setDetailTask(item)} activeOpacity={0.7}>
               <View style={[s.taskDot, { backgroundColor: sc.dot }]} />
               <View style={s.taskRowBody}>
                 <Text style={s.taskRowTitle} numberOfLines={1}>{item.title}</Text>
-                <Text style={[s.taskRowDate, isOverdue && s.overdueText]}>{isOverdue ? "⚠ " : "📅 "}{item.due_date}</Text>
+                <Text style={[s.taskRowDate, isOverdue && s.overdueText]}>
+                  {isOverdue ? "⚠ " : item.status === "completed" ? "✓ " : "📅 "}
+                  {displayDate}
+                </Text>
               </View>
               <View style={[s.statusPill, { backgroundColor: sc.bg }]}>
                 <Text style={[s.statusPillText, { color: sc.text }]}>{item.status === "inprogress" ? "In Progress" : item.status === "todo" ? "To Do" : "Done"}</Text>
@@ -173,38 +267,53 @@ export default function CalendarScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f0f2f5" },
+const createStyles = (theme: any) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: theme.bgPrimary },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   scroll: { paddingBottom: 32 },
   monthNav: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingVertical: 12 },
-  navBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#fff", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#e2e6ed" },
-  navText: { fontSize: 20, color: "#0f1c2e", lineHeight: 24 },
-  monthLabel: { fontSize: 18, fontWeight: "700", color: "#0f1c2e" },
+  navBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: theme.bgSecondary, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: theme.borderDefault },
+  navText: { fontSize: 20, color: theme.textPrimary, lineHeight: 24 },
+  monthLabel: { fontSize: 18, fontWeight: "700", color: theme.textPrimary },
   dayNames: { flexDirection: "row", paddingHorizontal: 12, marginBottom: 4 },
-  dayName: { flex: 1, textAlign: "center", fontSize: 11, fontWeight: "600", color: "#9aa5b4" },
+  dayName: { flex: 1, textAlign: "center", fontSize: 11, fontWeight: "600", color: theme.textMuted },
   grid: { paddingHorizontal: 12, marginBottom: 8 },
   week: { flexDirection: "row", marginBottom: 2 },
   dayCell: { flex: 1, alignItems: "center", paddingVertical: 6, borderRadius: 8 },
-  dayCellSelected: { backgroundColor: "#1a56db" },
-  dayNum: { fontSize: 14, fontWeight: "500", color: "#0f1c2e" },
-  todayNum: { color: "#1a56db", fontWeight: "800" },
-  selectedNum: { color: "#fff", fontWeight: "700" },
-  dot: { width: 4, height: 4, borderRadius: 2, backgroundColor: "#1a56db", marginTop: 2 },
-  dotSelected: { backgroundColor: "#fff" },
-  listHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 10, borderTopWidth: 1, borderTopColor: "#e2e6ed" },
-  listHeaderText: { fontSize: 13, fontWeight: "700", color: "#0f1c2e" },
-  clearDay: { fontSize: 13, color: "#1a56db", fontWeight: "600" },
+  dayCellSelected: { backgroundColor: theme.brandPrimary },
+  dayNum: { fontSize: 14, fontWeight: "500", color: theme.textPrimary },
+  todayNum: { color: theme.brandPrimary, fontWeight: "800" },
+  selectedNum: { color: theme.textInverse, fontWeight: "700" },
+  dot: { width: 4, height: 4, borderRadius: 2, backgroundColor: theme.brandPrimary, marginTop: 2 },
+  dotSelected: { backgroundColor: theme.textInverse },
+  listHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 10, borderTopWidth: 1, borderTopColor: theme.borderDefault },
+  listHeaderText: { fontSize: 13, fontWeight: "700", color: theme.textPrimary },
+  clearDay: { fontSize: 13, color: theme.brandPrimary, fontWeight: "600" },
   sectionHeader: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
-  sectionHeaderText: { fontSize: 11, fontWeight: "700", color: "#9aa5b4", textTransform: "uppercase", letterSpacing: 0.5 },
-  taskRow: { flexDirection: "row", alignItems: "center", backgroundColor: "#fff", marginHorizontal: 12, marginBottom: 6, borderRadius: 12, padding: 12, gap: 10, shadowColor: "#0f1c2e", shadowOpacity: 0.04, shadowRadius: 4, elevation: 1 },
+  sectionHeaderText: { fontSize: 11, fontWeight: "700", color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.5 },
+  taskRow: { flexDirection: "row", alignItems: "center", backgroundColor: theme.bgSecondary, marginHorizontal: 12, marginBottom: 6, borderRadius: 12, padding: 12, gap: 10, shadowColor: theme.shadowColor, shadowOpacity: 0.04, shadowRadius: 4, elevation: 1 },
   taskDot: { width: 8, height: 8, borderRadius: 4, flexShrink: 0 },
   taskRowBody: { flex: 1 },
-  taskRowTitle: { fontSize: 14, fontWeight: "600", color: "#0f1c2e", marginBottom: 2 },
-  taskRowDate: { fontSize: 12, color: "#9aa5b4" },
-  overdueText: { color: "#dc2626" },
+  taskRowTitle: { fontSize: 14, fontWeight: "600", color: theme.textPrimary, marginBottom: 2 },
+  taskRowDate: { fontSize: 12, color: theme.textMuted },
+  overdueText: { color: theme.danger },
   statusPill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
   statusPillText: { fontSize: 11, fontWeight: "700" },
   empty: { alignItems: "center", paddingTop: 32, paddingHorizontal: 20 },
-  emptyText: { color: "#9aa5b4", fontSize: 14, textAlign: "center" },
+  emptyText: { color: theme.textMuted, fontSize: 14, textAlign: "center" },
+  viewToggle: { flex: 1, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8, backgroundColor: theme.bgSecondary, borderWidth: 1, borderColor: theme.borderDefault, alignItems: "center" },
+  viewToggleActive: { backgroundColor: theme.brandPrimary, borderColor: theme.brandPrimary },
+  viewToggleText: { fontSize: 13, fontWeight: "600", color: theme.textSecondary },
+  viewToggleTextActive: { color: theme.textInverse },
+  weekDayRow: { backgroundColor: theme.bgSecondary, borderRadius: 12, marginBottom: 12, overflow: "hidden", borderWidth: 1, borderColor: theme.borderDefault },
+  weekDayRowToday: { borderColor: theme.brandPrimary, borderWidth: 2 },
+  weekDayRowHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 12, backgroundColor: theme.bgElevated, borderBottomWidth: 1, borderBottomColor: theme.borderDefault },
+  weekDayRowName: { fontSize: 14, fontWeight: "700", color: theme.textPrimary },
+  weekDayRowNum: { fontSize: 18, fontWeight: "700", color: theme.textSecondary },
+  weekDayRowNumToday: { color: theme.brandPrimary },
+  weekDayRowTasks: { padding: 12, gap: 8 },
+  weekDayRowEmpty: { fontSize: 13, color: theme.textMuted, fontStyle: "italic", textAlign: "center", paddingVertical: 8 },
+  weekTaskRowCard: { backgroundColor: theme.bgPrimary, borderRadius: 8, padding: 12, borderLeftWidth: 4, borderLeftColor: theme.brandPrimary, flexDirection: "row", alignItems: "flex-start", gap: 10 },
+  weekTaskRowDot: { width: 8, height: 8, borderRadius: 4, marginTop: 2 },
+  weekTaskRowTitle: { flex: 1, fontSize: 14, fontWeight: "600", color: theme.textPrimary, lineHeight: 20 },
 });

@@ -101,7 +101,7 @@ export async function handleRequest(req: Request, user: { user_id: number; email
       if (method === "DELETE") {
         const { rows } = await query("SELECT id, is_default FROM projects WHERE id=$1 AND user_id=$2", [pid, uid]);
         if (!rows[0]) return json({ error: "Not found" }, 404);
-        if (rows[0].is_default) return json({ error: "Cannot archive the default project" }, 403);
+        // Allow deletion of any project, including default
         
         // Check if project has tasks (only count tasks belonging to this user)
         const { rows: taskCount } = await query("SELECT COUNT(*) as count FROM tasks WHERE project_id=$1 AND user_id=$2", [pid, uid]);
@@ -118,7 +118,7 @@ export async function handleRequest(req: Request, user: { user_id: number; email
       const pid = parseInt(projectDeleteMatch[1]);
       const { rows } = await query("SELECT id, is_default, archived FROM projects WHERE id=$1 AND user_id=$2", [pid, uid]);
       if (!rows[0]) return json({ error: "Not found" }, 404);
-      if (rows[0].is_default) return json({ error: "Cannot delete the default project" }, 403);
+      // Allow deletion of any project, including default
       if (!rows[0].archived) return json({ error: "Project must be archived first" }, 400);
       
       // Delete all tasks in this project (only user's tasks)

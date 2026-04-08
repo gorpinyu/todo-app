@@ -36,12 +36,15 @@ A full-stack task management web application with Kanban board, calendar view, p
 - Separate Archived Projects view for project management
 
 ### Calendar View
-- Monthly and weekly calendar views
-- Drag-and-drop tasks to change due dates
+- Monthly and weekly calendar views with toggle buttons
+- Drag-and-drop tasks to change due dates (including Friday/Saturday fix)
 - Double-click tasks to open detail modal
+- Completed tasks display by completion date instead of due date
 - Colour-coded by status: grey (To Do), yellow (In Progress), green (Completed)
 - Overdue tasks shown in red
 - Navigate forward and backward through months/weeks
+- Calendar state persists during drag-and-drop operations
+- Timezone-aware date handling to prevent date shifting
 - Archived tasks excluded from calendar
 
 ### Authentication
@@ -51,6 +54,22 @@ A full-stack task management web application with Kanban board, calendar view, p
 - Contextual login error messages with reset and register shortcuts
 - Secure sign out with full state cleanup
 
+### Dark Mode & Theming
+- Light, dark, and system theme modes (web and mobile)
+- Persistent theme preference saved to localStorage/AsyncStorage
+- Settings modal with theme selector
+- Fully themed UI components including modals, forms, and calendar
+- Smooth theme transitions
+
+### Mobile App
+- Native iOS and Android app built with React Native and Expo
+- Full feature parity with web app
+- Project-based task filtering
+- Calendar view with month/week toggle
+- Dark mode support with system preference detection
+- Offline-capable with AsyncStorage for preferences
+- Touch-optimized UI with native gestures
+
 ---
 
 ## Tech Stack
@@ -58,6 +77,7 @@ A full-stack task management web application with Kanban board, calendar view, p
 | Layer | Technology |
 |---|---|
 | Frontend | React 18, TypeScript, Vite |
+| Mobile | React Native, Expo, TypeScript |
 | Backend | Node.js, TypeScript |
 | Database | PostgreSQL (AWS RDS) |
 | Auth | bcryptjs, jsonwebtoken |
@@ -155,6 +175,7 @@ todo-app/
 | `v1.2-archive-calendar` | Archive (soft-delete) + Calendar view |
 | `v1.3` | Password reset, restore from archive, overdue calendar highlighting |
 | `v1.4` | Task completion dates, project management, enhanced calendar (week view, drag-drop), user data isolation fixes |
+| `v1.5` | Dark mode support (web + mobile), mobile app with project support, calendar improvements (completion date display, timezone fixes, Friday/Saturday drag-drop fix) |
 
 ---
 
