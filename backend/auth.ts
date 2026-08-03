@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
-import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
+import nodemailer from "nodemailer";
 import { query, seedUserTasks, ensureDefaultProject } from "./db.js";
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "dev-secret-change-in-prod";
@@ -68,18 +68,28 @@ export async function handleAuth(req: Request): Promise<Response | null> {
   return null; // not an auth route
 }
 
-const lambdaClient = new LambdaClient({ region: "us-east-1" });
-const FROM_EMAIL = process.env.SES_FROM_EMAIL ?? "kiroandrii@gmail.com";
-const APP_URL = process.env.APP_URL ?? "https://d1tvflu4vk8bmb.cloudfront.net";
-const EMAIL_FUNCTION_NAME = process.env.EMAIL_FUNCTION_NAME ?? "";
+const APP_URL = process.env.APP_URL ?? "https://gorpyniuk.com";
+const GMAIL_USER = process.env.GMAIL_USER ?? "";
+const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD ?? "";
 
+const mailer = GMAIL_USER && GMAIL_APP_PASSWORD
+  ? nodemailer.createTransport({
+      service: "gmail",
+      auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
+    })
+  : null;
+
+// Fire-and-forget, same as the original Lambda InvocationType "Event" call — the caller
+// doesn't wait on this. Errors are caught here (not left to reject silently) because this
+// runs in a long-lived Node process, not a one-shot Lambda invocation: an uncaught rejection
+// here would crash request handling for every user, not just the one whose email failed.
 async function sendEmailAsync(to: string, subject: string, html: string, text: string) {
-  if (!EMAIL_FUNCTION_NAME) return;
-  await lambdaClient.send(new InvokeCommand({
-    FunctionName: EMAIL_FUNCTION_NAME,
-    InvocationType: "Event",
-    Payload: Buffer.from(JSON.stringify({ from: FROM_EMAIL, to, subject, html, text })),
-  }));
+  if (!mailer) return;
+  try {
+    await mailer.sendMail({ from: GMAIL_USER, to, subject, html, text });
+  } catch (err) {
+    console.error("[email] failed to send:", err);
+  }
 }
 
 export async function handlePasswordReset(req: Request): Promise<Response | null> {
