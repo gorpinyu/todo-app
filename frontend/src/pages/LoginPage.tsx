@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 
 type ErrorType = "wrong_password" | "not_found" | "other" | null;
@@ -9,6 +9,13 @@ function classifyError(msg: string): ErrorType {
   return "other";
 }
 
+const GOOGLE_ERROR_MESSAGES: Record<string, string> = {
+  google_state_mismatch: "Google sign-in expired or was tampered with — please try again.",
+  google_token_exchange: "Google sign-in failed — please try again.",
+  google_email_unverified: "That Google account's email isn't verified — please use a different sign-in method.",
+  google_unexpected: "Something went wrong signing in with Google — please try again.",
+};
+
 export default function LoginPage({ onSwitch, onForgotPassword }: { onSwitch: () => void; onForgotPassword: () => void }) {
   const { login } = useAuth();
   const [email, setEmail] = useState("");
@@ -16,6 +23,15 @@ export default function LoginPage({ onSwitch, onForgotPassword }: { onSwitch: ()
   const [error, setError] = useState("");
   const [errorType, setErrorType] = useState<ErrorType>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const authError = new URLSearchParams(window.location.search).get("auth_error");
+    if (authError) {
+      setError(GOOGLE_ERROR_MESSAGES[authError] ?? "Sign-in failed — please try again.");
+      setErrorType("other");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -88,6 +104,15 @@ export default function LoginPage({ onSwitch, onForgotPassword }: { onSwitch: ()
             {loading ? "Signing in…" : "Sign in"}
           </button>
         </form>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", margin: "1.25rem 0" }}>
+          <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+          <span style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>or</span>
+          <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+        </div>
+        <button type="button" className="btn btn-secondary auth-submit" style={{ width: "100%" }}
+          onClick={() => { window.location.href = "/api/auth/google"; }}>
+          Continue with Google
+        </button>
         <p className="auth-switch">
           Don't have an account?{" "}
           <button onClick={onSwitch} className="auth-link">Create one</button>

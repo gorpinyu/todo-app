@@ -29,9 +29,16 @@ export async function initDb(): Promise<void> {
   await query(`CREATE TABLE IF NOT EXISTS users (
     id            SERIAL PRIMARY KEY,
     email         TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
+    password_hash TEXT,
     created_at    TIMESTAMPTZ DEFAULT NOW()
   )`);
+
+  // Migration: password_hash was NOT NULL until Google sign-in was added —
+  // a Google-only account has no password. Safe to run every time (already
+  // nullable no-ops).
+  await query(`ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL`).catch(() => {});
+  // Migration: Google account linking (sub claim from the id_token).
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub TEXT UNIQUE`).catch(() => {});
 
   await query(`CREATE TABLE IF NOT EXISTS projects (
     id          SERIAL PRIMARY KEY,

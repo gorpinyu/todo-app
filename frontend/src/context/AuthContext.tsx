@@ -19,6 +19,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
 
   useEffect(() => {
+    // Google sign-in redirects here with a one-time `?google_token=` — the
+    // backend has no way to hand it to frontend JS directly (it's a full
+    // page navigation through Google, not a fetch), so it's bridged through
+    // the URL the same way password-reset links use `?reset_token=`. Read
+    // once, strip immediately so it never lingers in history.
+    const googleToken = new URLSearchParams(window.location.search).get("google_token");
+    if (googleToken) {
+      try {
+        const payload = JSON.parse(atob(googleToken.split(".")[1]));
+        persist(googleToken, { id: payload.user_id, email: payload.email });
+      } finally {
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+      return;
+    }
+
     const stored = localStorage.getItem("auth_token");
     const storedUser = localStorage.getItem("auth_user");
     if (stored && storedUser) {

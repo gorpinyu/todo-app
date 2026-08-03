@@ -1,6 +1,6 @@
 import * as http from "http";
 import { handleRequest } from "./routes.js";
-import { handleAuth, handlePasswordReset, verifyToken } from "./auth.js";
+import { handleAuth, handlePasswordReset, handleGoogleAuth, verifyToken } from "./auth.js";
 import { initDb } from "./db.js";
 
 let ready: Promise<void> | null = null;
@@ -9,7 +9,10 @@ function ensureReady() {
   return ready;
 }
 
-const AUTH_BYPASS = ["/api/auth/register", "/api/auth/login", "/api/auth/forgot-password", "/api/auth/reset-password"];
+const AUTH_BYPASS = [
+  "/api/auth/register", "/api/auth/login", "/api/auth/forgot-password", "/api/auth/reset-password",
+  "/api/auth/google", "/api/auth/google/callback",
+];
 
 const corsHeaders = {
   "Content-Type": "application/json",
@@ -59,7 +62,7 @@ async function dispatch(req: Request): Promise<Response> {
   }
 
   if (AUTH_BYPASS.includes(url.pathname)) {
-    const res = (await handleAuth(req)) ?? (await handlePasswordReset(req));
+    const res = (await handleAuth(req)) ?? (await handlePasswordReset(req)) ?? (await handleGoogleAuth(req));
     return res ?? new Response(JSON.stringify({ error: "Not found" }), { status: 404, headers: corsHeaders });
   }
 

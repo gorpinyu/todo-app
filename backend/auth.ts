@@ -57,6 +57,10 @@ export async function handleAuth(req: Request): Promise<Response | null> {
     if (rows.length === 0) return json({ error: "Invalid credentials" }, 401);
 
     const user = rows[0];
+    // Google-only accounts have no password_hash — bcrypt.compare needs a
+    // string hash, so this must be checked before calling it, not left to
+    // whatever bcryptjs does with null.
+    if (!user.password_hash) return json({ error: "Invalid credentials" }, 401);
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return json({ error: "Invalid credentials" }, 401);
 
@@ -138,6 +142,145 @@ export async function handlePasswordReset(req: Request): Promise<Response | null
     await query("UPDATE password_reset_tokens SET used = TRUE WHERE id = $1", [rows[0].id]);
 
     return json({ message: "Password updated successfully" });
+  }
+
+  return null;
+}
+
+// --- Google OAuth: server-side authorization-code flow. Same trust model and
+// account-linking behavior as hockey.gorpyniuk.com's implementation (see
+// N8N_Server_Setup_with_Claude/03_Setup/SITES.md), adapted for this app's
+// bearer-token-in-localStorage auth instead of an httpOnly session cookie:
+// the callback hands the JWT back via a one-time `?google_token=` query
+// param, the same bridge pattern this app already uses for password-reset
+// links (`?reset_token=`) — the frontend reads it once and immediately
+// strips it from the URL with history.replaceState.
+//
+// This uses its own Google Cloud project/OAuth client, separate from
+// hockey's — GOOGLE_CLIENT_ID/SECRET below are TaskBoard-specific.
+
+const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
+const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
+const STATE_COOKIE = "oauth_state";
+const STATE_COOKIE_MAX_AGE_SEC = 5 * 60;
+
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID ?? "";
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET ?? "";
+
+function googleRedirectUri(req: Request): string {
+  return process.env.GOOGLE_REDIRECT_URI ?? `${new URL(req.url).origin}/api/auth/google/callback`;
+}
+
+function parseCookie(req: Request, name: string): string | undefined {
+  const header = req.headers.get("cookie") ?? "";
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    if (part.slice(0, eq).trim() === name) return decodeURIComponent(part.slice(eq + 1).trim());
+  }
+  return undefined;
+}
+
+function redirect(location: string, setCookie?: string): Response {
+  const h: Record<string, string> = { Location: location };
+  if (setCookie) h["Set-Cookie"] = setCookie;
+  return new Response(null, { status: 302, headers: h });
+}
+
+const CLEAR_STATE_COOKIE = `${STATE_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Max-Age=0; Path=/`;
+
+export async function handleGoogleAuth(req: Request): Promise<Response | null> {
+  const url = new URL(req.url);
+
+  if (url.pathname === "/api/auth/google" && req.method === "GET") {
+    const state = crypto.randomBytes(16).toString("hex");
+    const params = new URLSearchParams({
+      client_id: GOOGLE_CLIENT_ID,
+      redirect_uri: googleRedirectUri(req),
+      response_type: "code",
+      scope: "openid email profile",
+      state,
+      prompt: "select_account",
+    });
+    return redirect(
+      `${GOOGLE_AUTH_URL}?${params.toString()}`,
+      `${STATE_COOKIE}=${state}; HttpOnly; Secure; SameSite=Lax; Max-Age=${STATE_COOKIE_MAX_AGE_SEC}; Path=/`,
+    );
+  }
+
+  if (url.pathname === "/api/auth/google/callback" && req.method === "GET") {
+    const code = url.searchParams.get("code");
+    const state = url.searchParams.get("state");
+    const cookieState = parseCookie(req, STATE_COOKIE);
+
+    if (!code || !state || !cookieState || state !== cookieState) {
+      return redirect(`${APP_URL}?auth_error=google_state_mismatch`, CLEAR_STATE_COOKIE);
+    }
+
+    try {
+      const tokenRes = await fetch(GOOGLE_TOKEN_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          code,
+          client_id: GOOGLE_CLIENT_ID,
+          client_secret: GOOGLE_CLIENT_SECRET,
+          redirect_uri: googleRedirectUri(req),
+          grant_type: "authorization_code",
+        }),
+      });
+      const tokenBody: any = await tokenRes.json();
+      if (!tokenRes.ok || !tokenBody.id_token) {
+        console.error("Google token exchange failed:", tokenBody);
+        return redirect(`${APP_URL}?auth_error=google_token_exchange`, CLEAR_STATE_COOKIE);
+      }
+
+      // Trusted without re-verifying the id_token's JWT signature: it came back
+      // to THIS SERVER directly from Google's token endpoint over a
+      // server-to-server HTTPS call authenticated with our own client secret —
+      // never touched by the browser. Same reasoning as hockey's implementation.
+      const payloadB64 = tokenBody.id_token.split(".")[1];
+      const payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8"));
+      const { sub: googleSub, email, email_verified: emailVerified } = payload;
+      if (!email || !emailVerified) {
+        return redirect(`${APP_URL}?auth_error=google_email_unverified`, CLEAR_STATE_COOKIE);
+      }
+      const normalizedEmail = String(email).trim().toLowerCase();
+
+      let user;
+      let found = await query("SELECT id, email FROM users WHERE google_sub = $1", [googleSub]);
+      user = found.rows[0];
+
+      if (!user) {
+        // Account-linking: an existing email/password user signing in with
+        // Google for the first time gets google_sub attached to their
+        // existing row instead of creating a duplicate account.
+        found = await query("SELECT id, email FROM users WHERE email = $1", [normalizedEmail]);
+        user = found.rows[0];
+        if (user) {
+          const updated = await query(
+            "UPDATE users SET google_sub = $1 WHERE id = $2 RETURNING id, email",
+            [googleSub, user.id],
+          );
+          user = updated.rows[0];
+        } else {
+          const created = await query(
+            "INSERT INTO users (email, google_sub) VALUES ($1, $2) RETURNING id, email",
+            [normalizedEmail, googleSub],
+          );
+          user = created.rows[0];
+        }
+      }
+
+      await ensureDefaultProject(user.id);
+      await seedUserTasks(user.id);
+
+      const authToken = token({ user_id: user.id, email: user.email });
+      return redirect(`${APP_URL}?google_token=${authToken}`, CLEAR_STATE_COOKIE);
+    } catch (err) {
+      console.error("Google OAuth callback error:", err);
+      return redirect(`${APP_URL}?auth_error=google_unexpected`, CLEAR_STATE_COOKIE);
+    }
   }
 
   return null;
