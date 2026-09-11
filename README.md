@@ -1,8 +1,21 @@
 # TaskBoard
 
-A full-stack task management web application with Kanban board, calendar view, project management, and multi-user authentication — deployed on AWS.
+A full-stack task management web application with Kanban board, calendar view, project management, multi-user authentication, and a native mobile app.
 
-**Live:** https://d1tvflu4vk8bmb.cloudfront.net
+**Live:** https://gorpyniuk.com
+
+Built with AI coding tools (Claude Code and Kiro). Originally designed and deployed on AWS, then migrated to a self-hosted Docker stack on a home server when the AWS free tier ended. Both versions live in this repository, see [Deployments and branches](#deployments-and-branches).
+
+---
+
+## Deployments and branches
+
+| Branch | Status | Where it runs |
+|---|---|---|
+| `t480-selfhosted` | **Production** (what https://gorpyniuk.com serves) | Home server (Lenovo T480): Docker containers behind Caddy, published through a Cloudflare Tunnel, shared PostgreSQL container |
+| `main` | Original AWS architecture, kept as reference | AWS Lambda + API Gateway, RDS PostgreSQL, CloudFront + S3, SES, deployed with AWS CDK |
+
+The frontend build is identical on both branches. The backend differs only in how it is hosted and how password-reset email is sent (SES via Lambda on `main`, Gmail SMTP via `nodemailer` on `t480-selfhosted`). The self-hosted branch also adds Google OAuth sign-in.
 
 ---
 
@@ -49,8 +62,9 @@ A full-stack task management web application with Kanban board, calendar view, p
 
 ### Authentication
 - Email and password registration — each user has their own isolated task board
+- Sign in with Google (server-side OAuth authorization-code flow, `t480-selfhosted` branch)
 - JWT-based authentication with 7-day token expiry
-- Password reset via email (AWS SES)
+- Password reset via email (Gmail SMTP on `t480-selfhosted`, AWS SES on `main`)
 - Contextual login error messages with reset and register shortcuts
 - Secure sign out with full state cleanup
 
@@ -79,12 +93,29 @@ A full-stack task management web application with Kanban board, calendar view, p
 | Frontend | React 18, TypeScript, Vite |
 | Mobile | React Native, Expo, TypeScript |
 | Backend | Node.js, TypeScript |
-| Database | PostgreSQL (AWS RDS) |
-| Auth | bcryptjs, jsonwebtoken |
-| Email | AWS SES (async via Lambda) |
-| Hosting | AWS CloudFront + S3 |
+| Database | PostgreSQL |
+| Auth | bcryptjs, jsonwebtoken, Google OAuth (`t480-selfhosted`) |
+
+### Hosting, `t480-selfhosted` (production)
+
+| Layer | Technology |
+|---|---|
+| Backend runtime | Long-lived Node.js process in a Docker container (`backend/Dockerfile`, multi-stage `node:20-alpine`) |
+| Frontend | Static `dist/` served by Caddy from a Docker container |
+| Database | Shared PostgreSQL container on the same host |
+| Email | Gmail SMTP via `nodemailer` |
+| Edge | Caddy reverse proxy, published through a Cloudflare Tunnel (no open inbound ports) |
+| Deploy | `git push` to `t480-selfhosted` picked up by a systemd timer that rebuilds and restarts the containers |
+
+### Hosting, `main` (original AWS architecture)
+
+| Layer | Technology |
+|---|---|
 | API | AWS API Gateway HTTP API + Lambda |
-| Infrastructure | AWS CDK (Python) |
+| Database | PostgreSQL on Amazon RDS |
+| Email | AWS SES (async via Lambda) |
+| Frontend hosting | AWS CloudFront + S3 |
+| Infrastructure | AWS CDK (Python), see `infra/` |
 
 ---
 
@@ -121,9 +152,19 @@ The frontend proxies `/api/*` to `http://localhost:3001` via Vite config.
 
 ---
 
-## Deploy to AWS
+## Deploy
 
-See [.kiro/steering/deploy.md](.kiro/steering/deploy.md) for the full deploy workflow.
+### Self-hosted (`t480-selfhosted`)
+
+The server runs a systemd timer that pulls the branch, builds `backend/Dockerfile` and the frontend, and restarts the containers behind Caddy. In practice a deploy is:
+
+```bash
+git push origin t480-selfhosted
+```
+
+Backend environment variables: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET`, `PORT`, `APP_URL`, `GMAIL_USER`, `GMAIL_APP_PASSWORD`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`. Leave `NODE_ENV` unset: the server only starts its HTTP listener when `NODE_ENV` is not `"production"` (that check originally distinguished Lambda from local runs).
+
+### AWS (`main`)
 
 ```bash
 # Build backend
@@ -150,17 +191,19 @@ todo-app/
 ├── backend/
 │   ├── server.ts     # HTTP server + Lambda handler
 │   ├── routes.ts     # Task, project, archive, comment routes
-│   ├── auth.ts       # Register, login, password reset
-│   └── db.ts         # PostgreSQL pool + schema + seed
+│   ├── auth.ts       # Register, login, Google OAuth, password reset
+│   ├── db.ts         # PostgreSQL pool + schema + seed
+│   └── Dockerfile    # Self-hosted container image (t480-selfhosted)
 ├── frontend/
 │   └── src/
 │       ├── components/   # Board, TaskCard, CalendarView, ArchiveView, ProjectArchiveView, modals
 │       ├── pages/        # Login, Register, ForgotPassword, ResetPassword
 │       ├── context/      # AuthContext, ProjectContext
 │       └── api.ts        # API client
+├── mobile/, taskboard-mobile/   # React Native + Expo app
 └── infra/
     └── src/
-        ├── app.py        # CDK entry point
+        ├── app.py        # CDK entry point (AWS, main branch)
         └── stack.py      # AWS infrastructure
 ```
 
@@ -176,6 +219,7 @@ todo-app/
 | `v1.3` | Password reset, restore from archive, overdue calendar highlighting |
 | `v1.4` | Task completion dates, project management, enhanced calendar (week view, drag-drop), user data isolation fixes |
 | `v1.5` | Dark mode support (web + mobile), mobile app with project support, calendar improvements (completion date display, timezone fixes, Friday/Saturday drag-drop fix) |
+| `t480-selfhosted` | Google OAuth sign-in, Gmail SMTP for password reset, Docker image, migration from AWS to a self-hosted server |
 
 ---
 
@@ -188,3 +232,4 @@ todo-app/
 - Protected default project from deletion
 - Comment ownership verification before deletion
 - Task ownership verification for all operations
+- Self-hosted deployment exposes nothing directly to the internet: Cloudflare Tunnel to Caddy, with maintenance routes blocked at the proxy
